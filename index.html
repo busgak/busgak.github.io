@@ -258,7 +258,7 @@ const store = {
 };
 
 let config = {
-  apiKey:"", stopId:"", stopName:"",
+  apiKey:"", stopId:"", stopIds:[], stopName:"",
   cityCode:23, cityName:"인천광역시",
   buses:[],            // ["16","302"]
   walkMin:5, prepMin:15,
@@ -575,23 +575,24 @@ function seoulStopItems(items){
 }
 
 function stopItemsFromList(list){
-  const out = [];
+  // TAGO는 같은 정류장이 운수 계통별로 2개 ID(ICB1…/ICB3…)로 나뉘는 경우가 있어
+  // 정류소번호+이름이 같으면 하나로 묶고 ID를 전부 보관한다 (도착정보는 전부 합쳐서 조회)
+  const by = new Map();
   for(const it of (list||[])){
     if(!it || !it.nodeid) continue;
-    out.push({
-      id: String(it.nodeid),
-      nm: String(it.nodenm||""),
-      shortId: it.nodeno==null ? "" : String(it.nodeno),
-      admin: ""
-    });
+    const no = it.nodeno==null ? "" : String(it.nodeno);
+    const nm = String(it.nodenm||"");
+    const key = no ? no+"|"+nm : String(it.nodeid);
+    if(!by.has(key)) by.set(key, {id:String(it.nodeid), ids:[String(it.nodeid)], nm, shortId:no, admin:""});
+    else by.get(key).ids.push(String(it.nodeid));
   }
-  return out;
+  return [...by.values()];
 }
 function renderStopItems(box, stops, note){
   let html = '<div class="stop-result">';
   for(const s of stops.slice(0,40)){
     const safeNm = (s.nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
-    html += `<div class="stop-item" onclick="pickStop('${s.id}','${safeNm}','${s.shortId}')">
+    html += `<div class="stop-item" onclick="pickStop('${(s.ids||[s.id]).join("|")}','${safeNm}','${s.shortId}')">
       <div><b>${s.nm||"(이름 없음)"}</b></div>
       <div class="sid">정류소번호 ${s.shortId||"-"} · ID ${s.id}</div></div>`;
   }
@@ -656,7 +657,9 @@ async function searchStop(){
   }
 }
 function pickStop(id, name, shortId){
-  config.stopId = id;
+  const ids = String(id).split("|").filter(Boolean);
+  config.stopId = ids[0];
+  config.stopIds = ids;
   config.stopName = name + (shortId ? " ("+shortId+")" : "");
   const sel = document.getElementById("sel-stop");
   sel.classList.remove("hidden");
@@ -715,12 +718,36 @@ async function fetchArrivalsGg(){
   }
   return out;
 }
+/* 기존 저장 정류장(단일 ID)에 쌍둥이 ID가 있는지 1회 탐색해 보정 */
+async function ensureStopIds(){
+  if(config.stopIds && config.stopIds.length) return;
+  const m = String(config.stopName||"").match(/\((\d{4,9})\)/);
+  if(m){
+    try{
+      const list = await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNo:m[1]});
+      const ids = (list||[]).filter(it=>it && it.nodeid).map(it=>String(it.nodeid));
+      if(ids.includes(config.stopId) && ids.length > 1){
+        config.stopIds = ids; persistConfig(); return;
+      }
+    }catch(e){ /* 보정 실패 시 단일 ID로 진행 */ }
+  }
+  config.stopIds = [config.stopId];
+  persistConfig();
+}
 async function fetchArrivals(){
   const p = provider();
   if(p==="seoul") return fetchArrivalsSeoul();
   if(p==="gyeonggi") return fetchArrivalsGg();
-  const list = await tagoCall("ArvlInfoInqireService", "getSttnAcctoArvlPrearngeInfoList", {nodeId:config.stopId});
-  if(!list) return []; // 결과 없음 (운행 전 등)
+  await ensureStopIds();
+  const ids = (config.stopIds && config.stopIds.length) ? config.stopIds : [config.stopId];
+  let firstErr = null;
+  const lists = await Promise.all(ids.map(id =>
+    tagoCall("ArvlInfoInqireService", "getSttnAcctoArvlPrearngeInfoList", {nodeId:id})
+      .catch(e => { if(!firstErr) firstErr = e; return null; })
+  ));
+  if(firstErr && lists.every(l => l === null)) throw firstErr;
+  const list = lists.filter(Boolean).flat();
+  if(!list.length) return []; // 결과 없음 (운행 전 등)
   const out = [];
   for(const it of (list||[])){
     const est = parseInt(it.arrtime, 10);
@@ -994,7 +1021,7 @@ function cityChanged(){
   config.cityCode = sel.value; // 숫자(TAGO) 또는 "S1"(서울)/"G41"(경기)
   config.cityName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : "";
   // 지역이 바뀌면 이전 정류장 선택은 무효
-  config.stopId = ""; config.stopName = "";
+  config.stopId = ""; config.stopIds = []; config.stopName = "";
   document.getElementById("sel-stop").classList.add("hidden");
   document.getElementById("sel-stop").innerHTML = "";
   document.getElementById("stop-results").innerHTML = "";

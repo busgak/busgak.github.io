@@ -1,5 +1,5 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v8";
+const CACHE = "bus-alarm-v9";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
