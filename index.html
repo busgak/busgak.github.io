@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -886,9 +886,30 @@ function updatePermBanner(){
   if(("Notification" in window) && Notification.permission!=="granted") b.classList.remove("hidden");
   else b.classList.add("hidden");
 }
+/* 오디오·음성 잠금 해제: 모바일 브라우저는 사용자 터치 이후에만 소리 재생을 허용 */
+let audioCtx = null;
+function unlockAudio(){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") audioCtx.resume();
+    if("speechSynthesis" in window){
+      speechSynthesis.resume();
+      if(!unlockAudio.done){
+        unlockAudio.done = true;
+        const u = new SpeechSynthesisUtterance(" ");
+        u.volume = 0;
+        speechSynthesis.speak(u); // 무음 발화로 이후 자동 음성 허용
+      }
+    }
+  }catch(e){}
+}
+document.addEventListener("pointerdown", unlockAudio);
+
 function beep(times){
   try{
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") audioCtx.resume();
+    const ctx = audioCtx;
     for(let i=0;i<times;i++){
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
@@ -921,7 +942,8 @@ function speak(text){
     if(!koVoice) pickKoVoice();
     if(koVoice) u.voice = koVoice;
     speechSynthesis.cancel();
-    speechSynthesis.speak(u);
+    speechSynthesis.resume(); // 안드로이드 크롬의 '멈춘 채 굳는' 버그 해제
+    setTimeout(()=>{ try{ speechSynthesis.speak(u); }catch(e){} }, 60);
   }catch(e){}
 }
 function testVoice(){
@@ -1048,6 +1070,7 @@ setInterval(()=>{
     });
     if(tick % (urgent ? 10 : 30) === 0 && !document.hidden) doFetch();
     if(tick % 15 === 0) updateWakeLock();
+    if(tick % 10 === 0 && "speechSynthesis" in window){ try{ speechSynthesis.resume(); }catch(e){} } // 음성엔진 멈춤 방지
     if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
   }catch(e){ /* 틱 하나의 오류가 루프를 죽이지 않게 */ }
 },1000);
