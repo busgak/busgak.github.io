@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v27";
+const APP_VERSION = "v28";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -800,7 +800,8 @@ async function computeOptions(){
   }
   opts.sort((x,y)=>x.departSec-y.departSec);
   const unresolved = config.buses.filter(b => !matched.has(normBusNo(b)));
-  return {opts: opts.filter(o=>o.departSec > -120).slice(0,3), unresolved, matchedAny: matched.size>0};
+  // 출발시각을 30초 넘게 지난 버스(걸어가도 못 타는 차)는 제외하고 다음 차를 보여줌
+  return {opts: opts.filter(o=>o.departSec > -30).slice(0,3), unresolved, matchedAny: matched.size>0};
 }
 
 /* ---------- 렌더링 ---------- */
@@ -826,7 +827,7 @@ function render(){
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
     const arr = o.estSec - elapsed;
-    if(dep < -120) continue;
+    if(dep < -30) continue; // 이미 놓친 버스는 표시하지 않음
     rank++;
     const depTime = new Date(now.getTime() + dep*1000);
     const arrTime = new Date(now.getTime() + arr*1000);
