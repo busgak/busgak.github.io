@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v26";
+const APP_VERSION = "v27";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -934,6 +934,8 @@ if("speechSynthesis" in window){
   pickKoVoice();
   speechSynthesis.onvoiceschanged = pickKoVoice;
 }
+// 버스번호를 자연스럽게 읽기: "43-1" → "43 다시 1"
+function busNoSpeech(no){ return String(no).replace(/-/g, " 다시 "); }
 const alarmLog = []; // 진단용 최근 이벤트
 function logEvt(msg){
   alarmLog.push(fmtClock(new Date()).slice(0,5) + " " + msg);
@@ -990,7 +992,7 @@ function speak(text){
 function testVoice(){
   config.voice = document.getElementById("in-voice").checked;
   // 실제 알람과 동일한 전체 경로 테스트: 배너 + 소리 + (켜져 있으면) 음성
-  notify("곧 출발 · 테스트", "알림이 이렇게 와요", 3, "테스트입니다. 버스가 3분 뒤에 출발하면 이렇게 알려드려요.");
+  notify("곧 출발 · 테스트", "알림이 이렇게 와요", 3, "테스트입니다. 223번 버스, 3분 뒤 출발입니다.");
 }
 function notify(title, body, soundTimes, speech){
   beep(soundTimes||2);
@@ -1035,10 +1037,10 @@ function checkAlarms(){
     // 화면 표시("3분 뒤"=반올림)와 같은 순간에 울리도록 3분 30초부터 "곧 출발"
     if(dep > 60 && dep <= 210) tryFire("soon", () =>
       notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
-        o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요."));
+        busNoSpeech(o.busNo)+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤 출발입니다."));
     if(dep <= 60 && dep > -60) tryFire("now", () =>
       notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
-        o.busNo+"번 버스, 지금 출발하세요!"));
+        busNoSpeech(o.busNo)+"번 버스, 출발하세요!"));
   }
   alarmsArmed = true;
 }
