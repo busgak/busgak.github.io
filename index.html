@@ -140,6 +140,9 @@ if(location.hostname === "busgak.github.io"){
   <div id="alarm-perm" class="notice hidden">
     알림 권한이 필요해요. <button class="btn small" style="margin-left:6px" onclick="askNotifPerm()">알림 켜기</button>
   </div>
+  <div id="voice-unlock-hint" class="notice hidden">
+    음성 안내를 켜려면 화면을 <b>한 번 터치</b>해 주세요. (터치 후 자동 알람도 음성으로 나와요)
+  </div>
   <div id="err-box"></div>
   <div id="cards"></div>
   <div id="unmatched-hint"></div>
@@ -258,7 +261,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v29";
+const APP_VERSION = "v30";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -892,22 +895,40 @@ function updatePermBanner(){
 }
 /* 오디오·음성 잠금 해제: 모바일 브라우저는 사용자 터치 이후에만 소리 재생을 허용 */
 let audioCtx = null;
+let speechUnlocked = false;
+function probeSpeech(){
+  // 무음 발화로 음성 재생 가능 여부 확인. 성공하면 이후 자동 알람 음성도 허용됨
+  try{
+    if(!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    u.onstart = () => {
+      speechUnlocked = true;
+      const hint = document.getElementById("voice-unlock-hint");
+      if(hint) hint.classList.add("hidden");
+    };
+    speechSynthesis.resume();
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
 function unlockAudio(){
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state === "suspended") audioCtx.resume();
-    if("speechSynthesis" in window){
-      speechSynthesis.resume();
-      if(!unlockAudio.done){
-        unlockAudio.done = true;
-        const u = new SpeechSynthesisUtterance(" ");
-        u.volume = 0;
-        speechSynthesis.speak(u); // 무음 발화로 이후 자동 음성 허용
-      }
-    }
+    if(!speechUnlocked) probeSpeech();
   }catch(e){}
 }
 document.addEventListener("pointerdown", unlockAudio);
+// 앱 시작 2초 후 음성 잠금 상태 점검 → 잠겨 있으면 터치 안내 표시
+setTimeout(()=>{
+  probeSpeech();
+  setTimeout(()=>{
+    if(!speechUnlocked && config.voice !== false && ("speechSynthesis" in window)){
+      const hint = document.getElementById("voice-unlock-hint");
+      if(hint) hint.classList.remove("hidden");
+    }
+  }, 1500);
+}, 2000);
 
 function beep(times){
   try{
