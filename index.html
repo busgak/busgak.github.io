@@ -12,6 +12,19 @@
 <meta property="og:image" content="https://nagalsigan.github.io/icon-512.png">
 <meta property="og:url" content="https://nagalsigan.github.io/">
 <meta property="og:type" content="website">
+<script>
+/* Google 애널리틱스 (배포 사이트에서만 작동, 로컬 테스트는 집계 제외) */
+if(location.hostname === "nagalsigan.github.io"){
+  var gaScript = document.createElement("script");
+  gaScript.async = true;
+  gaScript.src = "https://www.googletagmanager.com/gtag/js?id=G-34WB83R97F";
+  document.head.appendChild(gaScript);
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-34WB83R97F');
+}
+</script>
 <style>
   :root{
     /* 모노크롬 그래파이트 팔레트. 색은 출발 임박도(good/warn/bad)에만 사용 */
@@ -88,6 +101,11 @@
   .bigclock{font-variant-numeric:tabular-nums; font-size:13px; color:var(--sub);}
   .depart-sub{font-variant-numeric:tabular-nums;}
   .voicerow{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
+    display:flex; align-items:flex-end; justify-content:center;}
+  .modal-sheet{background:var(--card); border:1px solid var(--line); border-bottom:none;
+    border-radius:var(--radius) var(--radius) 0 0; width:100%; max-width:520px;
+    padding:20px 18px calc(20px + env(safe-area-inset-bottom));}
   details{margin-top:10px;}
   summary{cursor:pointer; color:var(--sub); font-size:13px;}
   .footer-space{height:8px;}
@@ -113,15 +131,6 @@
   <div class="statuszone">
     <span><span id="live-dot" class="dot"></span><span id="status-text">대기 중</span></span>
     <span class="bigclock" id="clock">--:--:--</span>
-  </div>
-  <div id="install-banner" class="notice hidden">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-      <span id="install-msg" style="flex:1 1 180px;">홈 화면에 설치하면 앱처럼 바로 열 수 있어요</span>
-      <span style="flex:0 0 auto; display:flex; gap:6px;">
-        <button id="install-btn" class="btn small" onclick="doInstall()">설치</button>
-        <button class="btn small secondary" onclick="dismissInstall()">나중에</button>
-      </span>
-    </div>
   </div>
   <div id="home-setup-hint" class="notice hidden">
     먼저 <b>설정 탭</b>에서 정류장과 버스번호를 입력해 주세요.
@@ -216,6 +225,19 @@
       </div>
     </div>
   </details>
+</div>
+
+<!-- ================= 설치 안내 모달 ================= -->
+<div id="install-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <h2 style="font-size:18px; color:var(--text); margin-bottom:6px;">나갈시간을 앱으로 설치하세요</h2>
+    <div class="muted" style="margin-bottom:14px; font-size:13.5px;">
+      홈 화면에 설치하면 매일 아침 아이콘 하나로 바로 열려요.
+    </div>
+    <div id="install-modal-body"></div>
+    <button class="btn" id="install-modal-main" onclick="doInstall()">앱 설치하기</button>
+    <button class="btn secondary" onclick="dismissInstall()">나중에 할게요</button>
+  </div>
 </div>
 
 <!-- ================= TABBAR ================= -->
@@ -1030,39 +1052,45 @@ window.addEventListener("beforeinstallprompt", function(e){
 });
 function maybeShowInstall(){
   if(isStandalone() || installDismissedRecently()) return;
-  const b = document.getElementById("install-banner");
+  const modal = document.getElementById("install-modal");
+  const body = document.getElementById("install-modal-body");
+  const mainBtn = document.getElementById("install-modal-main");
   const ua = navigator.userAgent;
+  const isAndroid = /android/i.test(ua);
+  const isIOS = /iphone|ipad|ipod/i.test(ua);
   // 카카오톡 인앱 브라우저: 설치 불가 → 외부 브라우저로 안내
   if(/KAKAOTALK/i.test(ua)){
-    const isAndroid = /android/i.test(ua);
-    const btn = document.getElementById("install-btn");
     if(isAndroid){
-      document.getElementById("install-msg").innerHTML = "카카오톡 안에서는 앱 설치가 안 돼요. Chrome으로 열어주세요";
-      btn.textContent = "Chrome으로 열기";
-      btn.onclick = function(){ location.href = "intent://nagalsigan.github.io/#Intent;scheme=https;package=com.android.chrome;end"; };
+      body.innerHTML = '<div class="notice">카카오톡 안에서는 설치가 안 돼요. Chrome으로 열어서 이어가 주세요.</div>';
+      mainBtn.classList.remove("hidden");
+      mainBtn.textContent = "Chrome으로 열기";
+      mainBtn.onclick = function(){ location.href = "intent://nagalsigan.github.io/#Intent;scheme=https;package=com.android.chrome;end"; };
     }else{
-      document.getElementById("install-msg").innerHTML =
-        "카카오톡 안에서는 앱 설치가 안 돼요. 이렇게 해주세요:<br>" +
-        "① 오른쪽 아래 <b>메뉴</b>에서 <b>Safari로 열기</b><br>" +
-        "② Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)을 누르고<br>" +
-        "③ <b>홈 화면에 추가</b>를 선택하면 설치 끝!";
-      btn.classList.add("hidden");
+      body.innerHTML = '<div class="notice">카카오톡 안에서는 설치가 안 돼요. 이렇게 해주세요:<br>' +
+        '① 오른쪽 아래 <b>메뉴</b>에서 <b>Safari로 열기</b><br>' +
+        '② Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)<br>' +
+        '③ <b>홈 화면에 추가</b>를 선택하면 설치 끝!</div>';
+      mainBtn.classList.add("hidden");
     }
-    b.classList.remove("hidden");
+    modal.classList.remove("hidden");
     return;
   }
+  // 설치 프롬프트 지원 (안드로이드 Chrome, PC Chrome/Edge)
   if(deferredInstall){
-    b.classList.remove("hidden");
+    body.innerHTML = "";
+    mainBtn.classList.remove("hidden");
+    mainBtn.textContent = "앱 설치하기";
+    mainBtn.onclick = doInstall;
+    modal.classList.remove("hidden");
     return;
   }
-  // iOS Safari: 설치 프롬프트가 없어 안내만 표시
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  // iOS Safari: 프롬프트가 없어 단계 안내
   if(isIOS){
-    document.getElementById("install-msg").innerHTML =
-      "앱으로 설치하는 법:<br>① Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)을 누르고<br>② <b>홈 화면에 추가</b>를 선택하면 끝!";
-    document.getElementById("install-btn").classList.add("hidden");
-    b.classList.remove("hidden");
+    body.innerHTML = '<div class="notice">① Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)을 누르고<br>② <b>홈 화면에 추가</b>를 선택하면 설치 끝!</div>';
+    mainBtn.classList.add("hidden");
+    modal.classList.remove("hidden");
   }
+  // 그 외 브라우저는 설치 경로가 없어 표시하지 않음
 }
 async function doInstall(){
   if(!deferredInstall) return;
@@ -1070,11 +1098,11 @@ async function doInstall(){
   deferredInstall = null;
   ev.prompt();
   try{ await ev.userChoice; }catch(e){}
-  document.getElementById("install-banner").classList.add("hidden");
+  document.getElementById("install-modal").classList.add("hidden");
 }
 function dismissInstall(){
   store.set("busAlarmInstallDismiss", String(Date.now()));
-  document.getElementById("install-banner").classList.add("hidden");
+  document.getElementById("install-modal").classList.add("hidden");
 }
 
 /* ---------- 의견 보내기 (URL을 채우면 설정 탭에 버튼이 나타남) ---------- */
