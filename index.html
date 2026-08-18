@@ -145,8 +145,8 @@ if(location.hostname === "busgak.github.io"){
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
   <div class="muted" style="margin-top:10px">
-    알람은 <b>앱이 열려 있는 동안</b> 작동해요. <b>알람 시간대에만</b> 화면이 꺼지지 않게 잡아주고,
-    시간대가 지나면 평소처럼 꺼져요. 출발 3분 전과 출발 시점에 소리·음성으로 알려드려요.
+    앱을 화면에 띄워두면 <b>꺼지지 않고</b> 실시간으로 확인하며 소리·음성으로 알려드려요.
+    앱을 닫아도 설정에서 <b>"앱이 꺼져 있어도 알림 받기"</b>를 켜두면 알람 시간대에 푸시로 알려드려요.
   </div>
   <details>
     <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
@@ -1001,12 +1001,12 @@ function setStatus(t, live){
   document.getElementById("status-text").textContent = t + (inWindow() ? "" : " · 알람 시간대 아님");
   document.getElementById("live-dot").className = "dot" + (live?" live":"");
 }
-/* 화면 유지: 알람 시간대 + 앱이 보이는 동안만. 그 외엔 평소처럼 화면이 꺼짐 */
+/* 화면 유지: 앱이 화면에 떠 있는 동안 (내리면 자동 해제되어 배터리 부담 없음) */
 let wakeLockObj = null;
 async function updateWakeLock(){
   try{
     if(!("wakeLock" in navigator)) return;
-    const want = inWindow() && !document.hidden && !!config.stopId;
+    const want = !document.hidden && !!config.stopId;
     if(want && !wakeLockObj){
       wakeLockObj = await navigator.wakeLock.request("screen");
       wakeLockObj.addEventListener("release", ()=>{ wakeLockObj = null; });
