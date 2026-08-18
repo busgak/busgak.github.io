@@ -1,9 +1,19 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v21";
+const CACHE = "bus-alarm-v22";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // HTTP 캐시를 우회해 서버에서 직접 최신 파일을 받아 캐시에 담는다 (구버전 재활용 방지)
+  e.waitUntil(
+    caches.open(CACHE).then(c =>
+      Promise.all(SHELL.map(u =>
+        fetch(new Request(u, { cache: "reload" })).then(res => {
+          if (!res.ok) throw new Error("shell fetch " + res.status);
+          return c.put(u, res);
+        })
+      ))
+    ).then(() => self.skipWaiting())
+  );
 });
 self.addEventListener("activate", e => {
   e.waitUntil(
