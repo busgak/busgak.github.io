@@ -189,8 +189,10 @@ if(location.hostname === "busgak.github.io"){
 
   <div class="card">
     <h2>2. 버스 번호</h2>
-    <label>탈 버스 번호 (여러 개면 쉼표로 구분)</label>
-    <input type="text" id="in-buses" placeholder="예: 16, 302, 급행99">
+    <label>탈 버스 선택 (정류장을 고르면 지나는 노선이 떠요)</label>
+    <div id="route-picker"></div>
+    <label>직접 입력 (여러 개면 쉼표로 구분)</label>
+    <input type="text" id="in-buses" placeholder="예: 16, 302, 급행99" oninput="renderRoutePicker()">
   </div>
 
   <div class="card">
@@ -261,7 +263,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v38";
+const APP_VERSION = "v39";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -679,6 +681,7 @@ function pickStop(id, name, shortId){
   config.stopId = ids[0];
   config.stopIds = ids;
   config.stopName = name + (shortId ? " ("+shortId+")" : "");
+  loadStopRoutes();
   const sel = document.getElementById("sel-stop");
   sel.classList.remove("hidden");
   sel.innerHTML = "선택됨: <b>" + config.stopName + "</b>";
@@ -973,6 +976,67 @@ if("speechSynthesis" in window){
   pickKoVoice();
   speechSynthesis.onvoiceschanged = pickKoVoice;
 }
+/* ---------- 정류장 경유 노선 선택 UI (타일 / 8개 이상이면 콤보박스) ---------- */
+let stopRoutes = [];
+async function loadStopRoutes(){
+  const box = document.getElementById("route-picker");
+  stopRoutes = [];
+  if(!box) return;
+  if(!config.stopId){ box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="muted" style="margin-bottom:6px">노선 불러오는 중…</div>';
+  try{
+    const p = provider();
+    let routes = [];
+    if(p === "tago"){
+      const ids = (config.stopIds && config.stopIds.length) ? config.stopIds : [config.stopId];
+      const lists = await Promise.all(ids.map(id =>
+        tagoCall("BusSttnInfoInqireService", "getSttnThrghRouteList", {nodeid:id}).catch(()=>null))); // 이 오퍼레이션만 소문자 nodeid
+      for(const l of lists) for(const it of (l||[])) if(it && it.routeno != null) routes.push(String(it.routeno));
+    }else if(p === "seoul"){
+      const items = await seoulCall("stationinfo/getStationByUid", {arsId:config.stopId});
+      for(const it of (items||[])) if(it && it.rtNm) routes.push(String(it.rtNm));
+    }else{
+      const body = await ggCall("busstationservice/v2/getBusStationViaRouteListv2", {stationId:config.stopId});
+      const list = body && body.busRouteList;
+      for(const it of (list ? (Array.isArray(list)?list:[list]) : [])) if(it && it.routeName != null) routes.push(String(it.routeName));
+    }
+    stopRoutes = [...new Set(routes)].sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
+    renderRoutePicker();
+    if(!stopRoutes.length) box.innerHTML = '<div class="muted" style="margin-bottom:6px">노선 목록이 없어요. 아래에 직접 입력해 주세요.</div>';
+  }catch(e){
+    box.innerHTML = '<div class="muted" style="margin-bottom:6px">노선 목록을 불러오지 못했어요. 아래에 직접 입력해 주세요.</div>';
+  }
+}
+function getSelectedBuses(){
+  return document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
+}
+function toggleRoute(no){
+  const cur = getSelectedBuses();
+  const i = cur.findIndex(b => normBusNo(b) === normBusNo(no));
+  if(i >= 0) cur.splice(i, 1); else cur.push(no);
+  document.getElementById("in-buses").value = cur.join(", ");
+  renderRoutePicker();
+}
+function renderRoutePicker(){
+  const box = document.getElementById("route-picker");
+  if(!box || !stopRoutes.length) return;
+  const sel = getSelectedBuses().map(normBusNo);
+  if(stopRoutes.length < 8){
+    box.innerHTML = stopRoutes.map(r =>
+      `<span class="chip ${sel.includes(normBusNo(r))?"on":""}" onclick="toggleRoute('${escHtml(r)}')">${escHtml(r)}</span>`).join("");
+  }else{
+    const options = stopRoutes.filter(r => !sel.includes(normBusNo(r)))
+      .map(r => `<option value="${escHtml(r)}">${escHtml(r)}</option>`).join("");
+    const chips = getSelectedBuses().map(r =>
+      `<span class="chip on" onclick="toggleRoute('${escHtml(r)}')">${escHtml(r)} ✕</span>`).join("");
+    box.innerHTML =
+      `<select onchange="if(this.value){toggleRoute(this.value); this.value='';}"
+        style="width:100%; background:var(--card2); color:var(--text); border:1px solid var(--line); border-radius:var(--radius-ctl); padding:11px 12px; font-size:15px; outline:none;">
+        <option value="">노선 선택해서 추가 (${stopRoutes.length}개)</option>${options}</select>
+      <div style="margin-top:8px">${chips || '<span class="muted">아직 선택한 버스가 없어요</span>'}</div>`;
+  }
+}
+
 // 버스번호를 자연스럽게 읽기: "43-1" → "43 다시 1"
 function busNoSpeech(no){ return String(no).replace(/-/g, " 다시 "); }
 const alarmLog = []; // 진단용 최근 이벤트
@@ -1307,6 +1371,7 @@ function cityChanged(){
   document.getElementById("sel-stop").innerHTML = "";
   document.getElementById("stop-results").innerHTML = "";
   document.getElementById("in-stopname").value = "";
+  stopRoutes = []; const rp = document.getElementById("route-picker"); if(rp) rp.innerHTML = "";
   persistConfig();
   updateSetupHint();
 }
@@ -1331,6 +1396,7 @@ function fillForm(){
     const sel = document.getElementById("sel-stop");
     sel.classList.remove("hidden");
     sel.innerHTML = "선택됨: <b>" + config.stopName + "</b>";
+    loadStopRoutes();
   }
   renderDayChips();
 }
