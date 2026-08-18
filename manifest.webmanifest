@@ -1,6 +1,6 @@
 {
-  "name": "나갈시간",
-  "short_name": "나갈시간",
+  "name": "버스각",
+  "short_name": "버스각",
   "description": "지금 나가면 탈 수 있는 버스를 알려주는 출근 알람",
   "start_url": "./",
   "scope": "./",
