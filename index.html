@@ -144,6 +144,10 @@ if(location.hostname === "busgak.github.io"){
   <div id="cards"></div>
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
+  <div class="muted" style="margin-top:10px">
+    알람은 <b>앱이 열려 있는 동안</b> 작동해요. 아침에 앱을 켜두면 화면이 꺼지지 않게 유지되고,
+    설정한 시간대에 출발 3분 전과 출발 시점에 소리·음성으로 알려드려요.
+  </div>
   <details>
     <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
     <div id="rawlist" class="muted" style="margin-top:8px"></div>
@@ -191,7 +195,8 @@ if(location.hostname === "busgak.github.io"){
     <label>출발 장소에서 정류장까지 걷는 시간(분)</label>
     <input type="number" id="in-walk" min="0" max="60" value="5">
     <div class="muted" style="margin-top:8px">
-      <b>출발시각</b> = 버스 도착예정 − 정류장까지 걷는 시간. 출발 3분 전과 출발 시점에 알림이 와요.
+      <b>출발시각</b> = 버스 도착예정 − 정류장까지 걷는 시간. 출발 3분 전과 출발 시점에 알림이 와요.<br>
+      알람은 앱이 열려 있는 동안, 아래 시간대·요일 안에서만 울려요.
     </div>
     <label style="margin-top:12px">알람 작동 시간대 (이 시간에만 자동 확인·알림)</label>
     <div class="row">
