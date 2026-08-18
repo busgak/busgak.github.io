@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v22";
+const APP_VERSION = "v23";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -856,7 +856,8 @@ function render(){
   const raw = document.getElementById("rawlist");
   const diag = "버전 " + APP_VERSION
     + " · 갱신 " + (lastFetchAt ? Math.round(elapsed) + "초 전" : "-")
-    + " · 화면유지 " + (("wakeLock" in navigator) ? (wakeLockObj ? "작동 중" : "꺼짐") : "미지원");
+    + " · 화면유지 " + (("wakeLock" in navigator) ? (wakeLockObj ? "작동 중" : "꺼짐") : "미지원")
+    + (alarmLog.length ? "<br>기록: " + alarmLog.join(" / ") : "");
   raw.innerHTML = diag + "<br>" + (lastArrivalsRaw.length
     ? lastArrivalsRaw.map(a=>`${a.routeNo||"?"}번 · ${Math.round((a.estSec-elapsed)/60)}분 후 도착 · ${a.restStops||"?"}정거장 전`).join("<br>")
     : "데이터 없음");
@@ -933,18 +934,26 @@ if("speechSynthesis" in window){
   pickKoVoice();
   speechSynthesis.onvoiceschanged = pickKoVoice;
 }
+const alarmLog = []; // 진단용 최근 이벤트
+function logEvt(msg){
+  alarmLog.push(fmtClock(new Date()).slice(0,5) + " " + msg);
+  if(alarmLog.length > 6) alarmLog.shift();
+}
 function speak(text){
-  if(config.voice===false) return;
+  if(config.voice===false){ logEvt("음성 꺼짐 상태"); return; }
   try{
-    if(!("speechSynthesis" in window)) return;
+    if(!("speechSynthesis" in window)){ logEvt("음성 미지원 기기"); return; }
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0;
     if(!koVoice) pickKoVoice();
     if(koVoice) u.voice = koVoice;
+    u.onstart = () => logEvt("음성 재생됨");
+    u.onerror = (e) => logEvt("음성 오류: " + (e.error||"?"));
     speechSynthesis.cancel();
     speechSynthesis.resume(); // 안드로이드 크롬의 '멈춘 채 굳는' 버그 해제
-    setTimeout(()=>{ try{ speechSynthesis.speak(u); }catch(e){} }, 60);
-  }catch(e){}
+    logEvt("음성 시도: " + text.slice(0,14));
+    setTimeout(()=>{ try{ speechSynthesis.speak(u); }catch(e){ logEvt("음성 예외"); } }, 60);
+  }catch(e){ logEvt("음성 예외2"); }
 }
 function testVoice(){
   config.voice = document.getElementById("in-voice").checked;
@@ -986,15 +995,17 @@ function checkAlarms(){
     const tryFire = (stage, fn) => {
       const k = normBusNo(o.busNo) + "|" + stage;
       if(nowMs - (lastAlarmAt.get(k)||0) < 4*60*1000) return; // 4분 내 중복 방지 (도착예측 흔들림 대응)
-      if(!alarmsArmed){ lastAlarmAt.set(k, nowMs); return; }  // 첫 확인: 조용히 등록만
-      if(!inWin) return;                                       // 알람 시간대 밖: 울리지도, 소모하지도 않음
+      if(!alarmsArmed){ lastAlarmAt.set(k, nowMs); logEvt("앱 켠 직후라 건너뜀: "+o.busNo); return; }
+      if(!inWin){ logEvt("시간대 밖: "+o.busNo); return; }
       lastAlarmAt.set(k, nowMs);
+      logEvt("알람 발생: "+o.busNo+" "+stage);
       fn();
     };
-    if(dep > 0 && dep <= 3*60) tryFire("soon", () =>
+    // 화면 표시("3분 뒤"=반올림)와 같은 순간에 울리도록 3분 30초부터 "곧 출발"
+    if(dep > 60 && dep <= 210) tryFire("soon", () =>
       notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
         o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요."));
-    if(dep <= 30 && dep > -60) tryFire("now", () =>
+    if(dep <= 60 && dep > -60) tryFire("now", () =>
       notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
         o.busNo+"번 버스, 지금 출발하세요!"));
   }
