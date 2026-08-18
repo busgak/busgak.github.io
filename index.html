@@ -145,8 +145,8 @@ if(location.hostname === "busgak.github.io"){
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
   <div class="muted" style="margin-top:10px">
-    알람은 <b>앱이 열려 있는 동안</b> 작동해요. 아침에 앱을 켜두면 화면이 꺼지지 않게 유지되고,
-    설정한 시간대에 출발 3분 전과 출발 시점에 소리·음성으로 알려드려요.
+    알람은 <b>앱이 열려 있는 동안</b> 작동해요. <b>알람 시간대에만</b> 화면이 꺼지지 않게 잡아주고,
+    시간대가 지나면 평소처럼 꺼져요. 출발 3분 전과 출발 시점에 소리·음성으로 알려드려요.
   </div>
   <details>
     <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
@@ -987,9 +987,21 @@ function setStatus(t, live){
   document.getElementById("status-text").textContent = t + (inWindow() ? "" : " · 알람 시간대 아님");
   document.getElementById("live-dot").className = "dot" + (live?" live":"");
 }
-async function keepAwake(){
-  try{ if("wakeLock" in navigator) await navigator.wakeLock.request("screen"); }catch(e){}
+/* 화면 유지: 알람 시간대 + 앱이 보이는 동안만. 그 외엔 평소처럼 화면이 꺼짐 */
+let wakeLockObj = null;
+async function updateWakeLock(){
+  try{
+    if(!("wakeLock" in navigator)) return;
+    const want = inWindow() && !document.hidden && !!config.stopId;
+    if(want && !wakeLockObj){
+      wakeLockObj = await navigator.wakeLock.request("screen");
+      wakeLockObj.addEventListener("release", ()=>{ wakeLockObj = null; });
+    }else if(!want && wakeLockObj){
+      wakeLockObj.release(); wakeLockObj = null;
+    }
+  }catch(e){}
 }
+function keepAwake(){ updateWakeLock(); }
 // 1초 틱: 시계/카운트다운 갱신. 앱이 화면에 보이는 동안 30초마다 자동 재조회
 let tick = 0;
 setInterval(()=>{
@@ -997,6 +1009,7 @@ setInterval(()=>{
   if(lastFetchAt) render();
   tick++;
   if(tick % 30 === 0 && !document.hidden) doFetch();
+  if(tick % 15 === 0) updateWakeLock(); // 알람 시간대 진입/이탈에 맞춰 화면 유지 갱신
   if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
 },1000);
 // 앱으로 돌아오면 즉시 최신화
