@@ -263,7 +263,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v41";
+const APP_VERSION = "v42";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -1485,30 +1485,35 @@ window.addEventListener("beforeinstallprompt", function(e){
   maybeShowInstall();
 });
 function maybeShowInstall(){
-  if(isStandalone() || installDismissedRecently()) return;
+  if(isStandalone()) return;
   const modal = document.getElementById("install-modal");
   const body = document.getElementById("install-modal-body");
   const mainBtn = document.getElementById("install-modal-main");
   const ua = navigator.userAgent;
   const isAndroid = /android/i.test(ua);
-  const isIOS = /iphone|ipad|ipod/i.test(ua);
-  // 카카오톡 인앱 브라우저: 설치 불가 → 외부 브라우저로 안내
+  const isIOSua = /iphone|ipad|ipod/i.test(ua);
+  // 카카오톡 인앱 브라우저: 설치가 불가능한 환경이라 안내를 항상 표시 (닫으면 이번 접속만 숨김)
   if(/KAKAOTALK/i.test(ua)){
+    try{ if(sessionStorage.getItem("kakaoHintClosed")==="1") return; }catch(e){}
     if(isAndroid){
-      body.innerHTML = '<div class="notice">카카오톡 안에서는 설치가 안 돼요. Chrome으로 열어서 이어가 주세요.</div>';
+      body.innerHTML = '<div class="notice"><b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>' +
+        '아래 버튼을 누르면 Chrome이 열리고, 거기서 바로 설치할 수 있어요.</div>';
       mainBtn.classList.remove("hidden");
-      mainBtn.textContent = "Chrome으로 열기";
+      mainBtn.textContent = "Chrome으로 열고 설치하기";
       mainBtn.onclick = function(){ location.href = "intent://busgak.github.io/#Intent;scheme=https;package=com.android.chrome;end"; };
     }else{
-      body.innerHTML = '<div class="notice">카카오톡 안에서는 설치가 안 돼요. 이렇게 해주세요:<br>' +
-        '① 오른쪽 아래 <b>메뉴</b>에서 <b>Safari로 열기</b><br>' +
-        '② Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)<br>' +
-        '③ <b>홈 화면에 추가</b>를 선택하면 설치 끝!</div>';
+      body.innerHTML = '<div class="notice"><b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>딱 3단계면 돼요:<br><br>' +
+        '<b>1.</b> 이 화면의 <b>공유하기</b> 버튼을 누르고<br>' +
+        '&nbsp;&nbsp;&nbsp;<b>Safari로 열기</b>를 선택<br><br>' +
+        '<b>2.</b> Safari가 열리면 <b>오른쪽 아래 ⋯ 더보기</b>를 누르고<br><br>' +
+        '<b>3.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>' +
+        '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
       mainBtn.classList.add("hidden");
     }
     modal.classList.remove("hidden");
     return;
   }
+  if(installDismissedRecently()) return;
   // 설치 프롬프트 지원 (안드로이드 Chrome, PC Chrome/Edge)
   if(deferredInstall){
     body.innerHTML = "";
@@ -1519,8 +1524,11 @@ function maybeShowInstall(){
     return;
   }
   // iOS Safari: 프롬프트가 없어 단계 안내
-  if(isIOS){
-    body.innerHTML = '<div class="notice">① Safari 아래쪽 <b>공유 버튼</b>(네모에 화살표)을 누르고<br>② <b>홈 화면에 추가</b>를 선택하면 설치 끝!</div>';
+  if(isIOSua){
+    body.innerHTML = '<div class="notice">딱 2단계면 돼요:<br><br>' +
+      '<b>1.</b> <b>오른쪽 아래 ⋯ 더보기</b> 또는 <b>공유 버튼</b>(위로 화살표)을 누르고<br><br>' +
+      '<b>2.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>' +
+      '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
     mainBtn.classList.add("hidden");
     modal.classList.remove("hidden");
   }
@@ -1535,7 +1543,11 @@ async function doInstall(){
   document.getElementById("install-modal").classList.add("hidden");
 }
 function dismissInstall(){
-  store.set("busAlarmInstallDismiss", String(Date.now()));
+  if(/KAKAOTALK/i.test(navigator.userAgent)){
+    try{ sessionStorage.setItem("kakaoHintClosed", "1"); }catch(e){} // 카카오는 이번 접속만 숨김
+  }else{
+    store.set("busAlarmInstallDismiss", String(Date.now()));
+  }
   document.getElementById("install-modal").classList.add("hidden");
 }
 
