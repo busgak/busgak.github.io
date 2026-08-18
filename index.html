@@ -109,6 +109,15 @@
     <span><span id="live-dot" class="dot"></span><span id="status-text">대기 중</span></span>
     <span class="bigclock" id="clock">--:--:--</span>
   </div>
+  <div id="install-banner" class="notice hidden">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <span id="install-msg" style="flex:1 1 180px;">홈 화면에 설치하면 앱처럼 바로 열 수 있어요</span>
+      <span style="flex:0 0 auto; display:flex; gap:6px;">
+        <button id="install-btn" class="btn small" onclick="doInstall()">설치</button>
+        <button class="btn small secondary" onclick="dismissInstall()">나중에</button>
+      </span>
+    </div>
+  </div>
   <div id="home-setup-hint" class="notice hidden">
     먼저 <b>설정 탭</b>에서 정류장과 버스번호를 입력해 주세요.
   </div>
@@ -999,10 +1008,54 @@ function updateSetupHint(){
   document.getElementById("home-setup-hint").classList.toggle("hidden", !need);
 }
 
+/* ---------- 앱 설치 배너 ---------- */
+let deferredInstall = null;
+function isStandalone(){
+  return (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+}
+function installDismissedRecently(){
+  const t = parseInt(store.get("busAlarmInstallDismiss")||"0",10);
+  return t && (Date.now()-t) < 7*24*3600*1000;
+}
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault();
+  deferredInstall = e;
+  maybeShowInstall();
+});
+function maybeShowInstall(){
+  if(isStandalone() || installDismissedRecently()) return;
+  const b = document.getElementById("install-banner");
+  if(deferredInstall){
+    b.classList.remove("hidden");
+    return;
+  }
+  // iOS Safari: 설치 프롬프트가 없어 안내만 표시
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isIOS){
+    document.getElementById("install-msg").innerHTML =
+      "앱으로 설치하려면 Safari <b>공유 버튼</b>을 누르고 <b>홈 화면에 추가</b>를 선택하세요";
+    document.getElementById("install-btn").classList.add("hidden");
+    b.classList.remove("hidden");
+  }
+}
+async function doInstall(){
+  if(!deferredInstall) return;
+  const ev = deferredInstall;
+  deferredInstall = null;
+  ev.prompt();
+  try{ await ev.userChoice; }catch(e){}
+  document.getElementById("install-banner").classList.add("hidden");
+}
+function dismissInstall(){
+  store.set("busAlarmInstallDismiss", String(Date.now()));
+  document.getElementById("install-banner").classList.add("hidden");
+}
+
 /* ---------- 초기화 ---------- */
 loadConfig();
 fillForm();
 updateSetupHint();
+maybeShowInstall();
 updatePermBanner();
 if(config.apiKey && config.stopId && config.buses.length){
   doFetch();
