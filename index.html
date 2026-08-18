@@ -879,15 +879,29 @@ function beep(times){
     }
   }catch(e){}
 }
-/* 음성 안내 (Web Speech API) */
+/* 음성 안내 (Web Speech API) — 기기에서 가장 자연스러운 한국어 음성을 자동 선택 */
+let koVoice = null;
+function pickKoVoice(){
+  try{
+    const vs = speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith("ko"));
+    if(!vs.length){ koVoice = null; return; }
+    koVoice = vs.find(v => /natural|neural/i.test(v.name))   // Edge 자연 음성
+           || vs.find(v => /google/i.test(v.name))           // Google 음성
+           || vs[0];
+  }catch(e){}
+}
+if("speechSynthesis" in window){
+  pickKoVoice();
+  speechSynthesis.onvoiceschanged = pickKoVoice;
+}
 function speak(text){
   if(config.voice===false) return;
   try{
     if(!("speechSynthesis" in window)) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ko-KR"; u.rate = 1.0;
-    const ko = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith("ko"));
-    if(ko) u.voice = ko;
+    u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0;
+    if(!koVoice) pickKoVoice();
+    if(koVoice) u.voice = koVoice;
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }catch(e){}
