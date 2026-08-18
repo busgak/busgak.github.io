@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v28";
+const APP_VERSION = "v29";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -348,7 +348,7 @@ function applyProfile(i){
   Object.assign(config, JSON.parse(JSON.stringify(profiles.list[i].data)));
   saveProfiles();
   persistConfig();
-  notified.clear(); lastAlarmAt.clear();
+  notified.clear(); lastAlarmAt.clear(); seenSoon.clear(); lastMinByBus.clear();
   alarmsArmed = false; // 전환 직후 첫 확인은 조용히
   cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
   quietPushSync(); // 푸시 설정도 새 프로필 기준으로 갱신
@@ -812,8 +812,10 @@ let cachedOpts = [];
 function fmtClock(d){ return d.toTimeString().slice(0,8); }
 function fmtHM(d){ return (d.getHours()<10?"0":"")+d.getHours()+":"+(d.getMinutes()<10?"0":"")+d.getMinutes(); }
 function fmtMin(sec){
-  if(sec <= 30) return "지금";
-  const m = Math.round(sec/60);
+  if(sec <= 10) return "지금";
+  const m = Math.floor(sec/60), s = Math.floor(sec%60);
+  if(m <= 0) return s + "초 뒤";
+  if(m < 10) return m + "분 " + s + "초 뒤"; // 10분 미만은 초까지 (카카오맵 스타일)
   return m + "분 뒤";
 }
 function render(){
@@ -860,7 +862,7 @@ function render(){
     + " · 화면유지 " + (("wakeLock" in navigator) ? (wakeLockObj ? "작동 중" : "꺼짐") : "미지원")
     + (alarmLog.length ? "<br>기록: " + alarmLog.join(" / ") : "");
   raw.innerHTML = diag + "<br>" + (lastArrivalsRaw.length
-    ? lastArrivalsRaw.map(a=>`${a.routeNo||"?"}번 · ${Math.round((a.estSec-elapsed)/60)}분 후 도착 · ${a.restStops||"?"}정거장 전`).join("<br>")
+    ? lastArrivalsRaw.map(a=>`${a.routeNo||"?"}번 · ${fmtMin(Math.max(0,a.estSec-elapsed)).replace(" 뒤","")} 후 도착 · ${a.restStops||"?"}정거장 전`).join("<br>")
     : "데이터 없음");
 }
 
@@ -1016,32 +1018,57 @@ function notify(title, body, soundTimes, speech){
 // 그 이후 새로 조건에 진입하는 버스만 알린다 (열자마자 알람이 울리는 것 방지).
 // 알림 기록은 노선번호+단계별 "최근 4분" 기준 → 같은 노선의 다음 버스는 다시 울린다.
 let alarmsArmed = false;
-const lastAlarmAt = new Map(); // "버스번호|단계" -> epoch ms
+const lastAlarmAt = new Map();  // "버스번호|단계" -> epoch ms (사라짐 안내 중복 방지)
+const seenSoon = new Map();     // "곧 출발" 구간에 들어왔던 버스 (사라짐 감지용)
+const lastMinByBus = new Map(); // 버스번호 -> 마지막으로 안내한 남은 분 (카운트다운)
 function checkAlarms(){
   if(!lastFetchAt) return;
   const now = new Date();
   const nowMs = now.getTime();
   // 앱이 켜져 있는 동안에는 시간대와 무관하게 항상 알림 (시간대·요일은 앱이 꺼졌을 때의 푸시에만 적용)
   const elapsed = (now-lastFetchAt)/1000;
+  // 1분 카운트다운: 3분 30초 안에 들어오면 매분 안내 (3분 → 2분 → 1분 → 출발하세요)
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
+    if(dep > 210 || dep <= -60) continue;
+    const nb = normBusNo(o.busNo);
+    seenSoon.set(nb, nowMs);
+    const m = Math.max(0, Math.round(dep/60));
+    const has = lastMinByBus.has(nb);
+    const prev = has ? lastMinByBus.get(nb) : null;
+    if(has && m >= prev + 2){ lastMinByBus.set(nb, m); logEvt("예측 밀림, 기준 재설정: "+o.busNo); continue; }
+    if(has && m >= prev) continue; // 같은 분(또는 1분 밀림)은 다시 안내하지 않음
+    lastMinByBus.set(nb, m);
+    if(!alarmsArmed){ logEvt("앱 켠 직후라 건너뜀: "+o.busNo); continue; }
     const depTime = fmtHM(new Date(nowMs + dep*1000));
-    const depMin = Math.round(dep/60);
-    const tryFire = (stage, fn) => {
-      const k = normBusNo(o.busNo) + "|" + stage;
-      if(nowMs - (lastAlarmAt.get(k)||0) < 4*60*1000) return; // 4분 내 중복 방지 (도착예측 흔들림 대응)
-      if(!alarmsArmed){ lastAlarmAt.set(k, nowMs); logEvt("앱 켠 직후라 건너뜀: "+o.busNo); return; }
-      lastAlarmAt.set(k, nowMs);
-      logEvt("알람 발생: "+o.busNo+" "+stage);
-      fn();
-    };
-    // 화면 표시("3분 뒤"=반올림)와 같은 순간에 울리도록 3분 30초부터 "곧 출발"
-    if(dep > 60 && dep <= 210) tryFire("soon", () =>
-      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
-        busNoSpeech(o.busNo)+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤 출발입니다."));
-    if(dep <= 60 && dep > -60) tryFire("now", () =>
+    logEvt("알람: "+o.busNo+" "+m+"분");
+    if(m >= 1){
+      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+m+"분 뒤)", 3,
+        busNoSpeech(o.busNo)+"번 버스, "+m+"분 뒤 출발입니다.");
+    }else{
       notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
-        busNoSpeech(o.busNo)+"번 버스, 출발하세요!"));
+        busNoSpeech(o.busNo)+"번 버스, 출발하세요!");
+    }
+  }
+  // "곧 출발" 구간에 있던 버스가 예고 없이 사라지면(예측 급변 등) 출발 안내를 대신 보냄
+  const present = new Set(cachedOpts.map(o => normBusNo(o.busNo)));
+  for(const [bus, t] of [...seenSoon]){
+    if(nowMs - t > 10*60*1000){ seenSoon.delete(bus); continue; }
+    if(present.has(bus)) continue;
+    seenSoon.delete(bus);
+    lastMinByBus.delete(bus); // 같은 번호의 다음 버스가 새로 카운트다운하도록
+    const k = bus + "|now";
+    if(alarmsArmed && nowMs - (lastAlarmAt.get(k)||0) >= 4*60*1000){
+      lastAlarmAt.set(k, nowMs);
+      logEvt("사라짐 감지: "+bus);
+      // 다음 대안까지 함께 안내 (출근자 관점: "그럼 이제 뭘 타지?"에 바로 답)
+      const next = cachedOpts[0];
+      const nextDep = next ? Math.max(1, Math.round((next.departSec - elapsed)/60)) : null;
+      const nextTxt = next ? " 다음은 "+next.busNo+"번, "+nextDep+"분 뒤 출발" : "";
+      notify("출발함 · "+bus+"번", "방금 출발했어요." + (next ? nextTxt : " 다음 버스를 확인하세요"), 3,
+        busNoSpeech(bus)+"번 버스가 방금 출발했어요." +
+        (next ? " 다음은 "+busNoSpeech(next.busNo)+"번 버스, "+nextDep+"분 뒤 출발입니다." : " 다음 버스를 확인해 주세요."));
+    }
   }
   alarmsArmed = true;
 }
