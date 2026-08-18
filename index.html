@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#111113">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>나갈시간</title>
+<style>
+  :root{
+    /* 모노크롬 그래파이트 팔레트. 색은 출발 임박도(good/warn/bad)에만 사용 */
+    --bg:#111113; --card:#1a1a1d; --card2:#232327; --line:#2b2b30; --line-strong:#3f3f46;
+    --text:#f4f4f5; --sub:#9c9ca4;
+    --btn-bg:#f4f4f5; --btn-fg:#131316;
+    --good:#34d399; --warn:#fbbf24; --bad:#f87171;
+    /* 반경 체계: 카드 14px / 버튼·입력 10px / 칩 pill */
+    --radius:14px; --radius-ctl:10px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
+    background:var(--bg); color:var(--text); max-width:520px; margin:0 auto; padding:16px 14px 90px;
+  }
+  h1{font-size:21px; letter-spacing:-.02em; margin-bottom:2px;}
+  .subtitle{color:var(--sub); font-size:12.5px; margin-bottom:14px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:12px;}
+  .card h2{font-size:13px; color:var(--sub); font-weight:700; margin-bottom:10px; letter-spacing:.02em;}
+  label{display:block; font-size:12.5px; color:var(--sub); margin:10px 0 5px;}
+  input,select,button{font:inherit; color:inherit;}
+  input[type=text],input[type=password],input[type=number],input[type=time]{
+    width:100%; background:var(--card2); border:1px solid var(--line); border-radius:var(--radius-ctl);
+    padding:11px 12px; font-size:15px; outline:none;
+  }
+  input:focus{border-color:var(--line-strong);}
+  .row{display:flex; gap:10px;}
+  .row>*{flex:1;}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
+    background:var(--btn-bg); color:var(--btn-fg); border:none; border-radius:var(--radius-ctl);
+    padding:12px 16px; font-size:15px; font-weight:700; width:100%; margin-top:12px;
+  }
+  .btn.secondary{background:var(--card2); border:1px solid var(--line); color:var(--text); font-weight:600;}
+  .btn.small{width:auto; padding:8px 12px; font-size:13px; margin-top:0;}
+  .btn:active{transform:scale(.98);}
+  .muted{color:var(--sub); font-size:12px; line-height:1.55;}
+  .stop-result{max-height:230px; overflow-y:auto; margin-top:10px; border:1px solid var(--line); border-radius:10px;}
+  .stop-item{padding:11px 12px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px;}
+  .stop-item:last-child{border-bottom:none;}
+  .stop-item:hover,.stop-item:active{background:var(--card2);}
+  .stop-item .sid{color:var(--sub); font-size:12px;}
+  .chip{display:inline-block; background:var(--card2); border:1px solid var(--line); border-radius:999px;
+    padding:4px 11px; font-size:12.5px; margin:3px 4px 0 0; color:var(--text);}
+  .chip.on{background:var(--btn-bg); border-color:var(--btn-bg); color:var(--btn-fg);}
+  /* main departure cards */
+  .depart-card{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); padding:16px; margin-bottom:10px; position:relative; overflow:hidden;
+  }
+  .depart-card.best{border-color:var(--line-strong);}
+  .depart-card .accentbar{position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--good);}
+  .depart-main{font-size:26px; font-weight:800; line-height:1.2; font-variant-numeric:tabular-nums; letter-spacing:-.01em;}
+  .depart-main small{font-size:15px; font-weight:600; color:var(--sub);}
+  .depart-sub{margin-top:7px; font-size:13.5px; color:var(--sub); display:flex; flex-wrap:wrap; gap:4px 14px;}
+  .busno{display:inline-block; background:var(--btn-bg); color:var(--btn-fg); font-weight:800; font-size:14px;
+    border-radius:999px; padding:3px 11px; margin-right:8px; vertical-align:3px;}
+  .statuszone{margin:8px 0 12px; font-size:13px; color:var(--sub); display:flex; justify-content:space-between; align-items:center;}
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--sub); margin-right:5px;}
+  .dot.live{background:var(--good); box-shadow:0 0 8px var(--good);}
+  .err{background:#3a1f28; border:1px solid #7c3141; color:#ffb9c4; border-radius:10px;
+    padding:10px 12px; font-size:13px; margin:8px 0; line-height:1.5; word-break:break-all;}
+  .notice{background:var(--card2); border:1px solid var(--line-strong); color:var(--text); border-radius:10px;
+    padding:10px 12px; font-size:13px; margin:8px 0; line-height:1.5;}
+  .hidden{display:none !important;}
+  .tabbar{position:fixed; bottom:0; left:0; right:0; display:flex; max-width:520px; margin:0 auto;
+    background:rgba(17,17,19,.97); border-top:1px solid var(--line); backdrop-filter:blur(8px);}
+  .tabbar button{flex:1; background:none; border:none; border-top:2px solid transparent; color:var(--sub);
+    padding:14px 0 max(14px, env(safe-area-inset-bottom)); font-size:14.5px; font-weight:600; cursor:pointer;}
+  .tabbar button.on{color:var(--text); font-weight:800; border-top-color:var(--text);}
+  .maplist .stop-item{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .maplist input{width:90px; text-align:center; padding:8px;}
+  .bigclock{font-variant-numeric:tabular-nums; font-size:13px; color:var(--sub);}
+  .depart-sub{font-variant-numeric:tabular-nums;}
+  .voicerow{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+  details{margin-top:10px;}
+  summary{cursor:pointer; color:var(--sub); font-size:13px;}
+  .footer-space{height:8px;}
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f5f5f6; --card:#ffffff; --card2:#ececee; --line:#e0e0e3; --line-strong:#c9c9cf;
+      --text:#1a1a1d; --sub:#69696f;
+      --btn-bg:#1a1a1d; --btn-fg:#ffffff;
+      --good:#059669; --warn:#d97706; --bad:#dc2626;
+    }
+    .tabbar{background:rgba(255,255,255,.96);}
+    .err{background:#fdecef; border-color:#f3b6c0; color:#a12338;}
+  }
+</style>
+</head>
+<body>
+
+<h1>나갈시간</h1>
+<div class="subtitle">지금 나가면 탈 수 있는 버스를 알려줘요 · 전국 실시간 도착정보</div>
+
+<!-- ================= HOME ================= -->
+<div id="view-home">
+  <div class="statuszone">
+    <span><span id="live-dot" class="dot"></span><span id="status-text">대기 중</span></span>
+    <span class="bigclock" id="clock">--:--:--</span>
+  </div>
+  <div id="home-setup-hint" class="notice hidden">
+    먼저 <b>설정 탭</b>에서 정류장과 버스번호를 입력해 주세요.
+  </div>
+  <div id="alarm-perm" class="notice hidden">
+    알림 권한이 필요해요. <button class="btn small" style="margin-left:6px" onclick="askNotifPerm()">알림 켜기</button>
+  </div>
+  <div id="err-box"></div>
+  <div id="cards"></div>
+  <div id="unmatched-hint"></div>
+  <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
+  <button class="btn secondary" id="btn-auto" onclick="toggleAuto()">자동 새로고침 시작</button>
+  <details>
+    <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
+    <div id="rawlist" class="muted" style="margin-top:8px"></div>
+  </details>
+</div>
+
+<!-- ================= SETTINGS ================= -->
+<div id="view-settings" class="hidden">
+
+  <div class="card">
+    <h2>1. 버스 정류장</h2>
+    <label>지역 선택</label>
+    <select id="in-city" onchange="cityChanged()" style="width:100%; background:var(--card2); color:var(--text); border:1px solid var(--line); border-radius:var(--radius-ctl); padding:11px 12px; font-size:15px; outline:none;">
+      <option value="23">인천광역시</option>
+    </select>
+    <label>정류장 이름 또는 정류소번호(표지판 5자리 숫자)로 검색</label>
+    <div class="row">
+      <input type="text" id="in-stopname" placeholder="예: 부평역 또는 37121" onkeydown="if(event.key==='Enter')searchStop()">
+      <button class="btn small secondary" style="flex:0 0 auto" onclick="searchStop()">검색</button>
+    </div>
+    <div id="stop-results"></div>
+    <div id="sel-stop" class="notice hidden"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. 버스 번호</h2>
+    <label>탈 버스 번호 (여러 개면 쉼표로 구분)</label>
+    <input type="text" id="in-buses" placeholder="예: 16, 302, 급행99">
+  </div>
+
+  <div class="card">
+    <h2>3. 시간 설정</h2>
+    <div class="row">
+      <div>
+        <label>집에서 정류장까지 걷는 시간(분)</label>
+        <input type="number" id="in-walk" min="0" max="60" value="5">
+      </div>
+      <div>
+        <label>준비 소요시간(분)</label>
+        <input type="number" id="in-prep" min="0" max="120" value="15">
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px">
+      · <b>출발시각</b> = 버스 도착예정 − 정류장까지 가는 시간<br>
+      · 출발까지 남은 시간이 <b>준비 소요시간</b> 안으로 들어오면 "준비 시작" 알림을 보내요.
+    </div>
+    <label style="margin-top:12px">알람 작동 시간대 (이 시간에만 자동 확인·알림)</label>
+    <div class="row">
+      <input type="time" id="in-start" value="06:30">
+      <input type="time" id="in-end" value="09:00">
+    </div>
+    <label style="margin-top:12px">작동 요일</label>
+    <div id="daychips"></div>
+    <div class="voicerow" style="margin-top:14px">
+      <label class="switch" style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
+        <input type="checkbox" id="in-voice" checked style="width:18px; height:18px; accent-color:var(--btn-bg);">
+        음성으로도 알려주기
+      </label>
+      <button class="btn small secondary" type="button" onclick="testVoice()">들어보기</button>
+    </div>
+  </div>
+
+  <button class="btn" onclick="saveSettings()">설정 저장</button>
+  <button class="btn secondary" onclick="copyConfigLink()">설정 링크 복사 (즐겨찾기용)</button>
+  <div class="muted" style="margin-top:10px">
+    저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정이 담긴 링크」를
+    즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요. (링크에 API 키가 포함되니 다른 사람과 공유하지 마세요!)
+  </div>
+
+  <details style="margin-top:14px">
+    <summary>고급: 다른 API 키 사용</summary>
+    <div class="card" style="margin-top:10px">
+      <label>공공데이터포털 일반 인증키 (기본은 앱 내장 키)</label>
+      <input type="password" id="in-apikey" placeholder="비워두면 앱 내장 키를 사용해요">
+      <button class="btn small secondary" style="margin-top:10px" onclick="saveApiKey()">API 키만 저장</button>
+      <span id="apikey-status" class="muted" style="margin-left:8px"></span>
+      <div class="muted" style="margin-top:8px">
+        직접 발급한 키를 쓰려면 data.go.kr에서 「국토교통부_(TAGO)_버스도착정보」와 「국토교통부_(TAGO)_버스정류소정보」를 활용신청하세요.
+      </div>
+    </div>
+  </details>
+</div>
+
+<!-- ================= TABBAR ================= -->
+<div class="tabbar">
+  <button id="tab-home" class="on" onclick="showView('home')">홈</button>
+  <button id="tab-settings" onclick="showView('settings')">설정</button>
+</div>
+
+<script>
+/* =====================================================================
+   버스 출발 알리미 - 국토교통부 TAGO 공공데이터 API 사용 (전국)
+   - 도시 목록   : /1613000/BusSttnInfoInqireService/getCtyCodeList
+   - 정류소 검색 : /1613000/BusSttnInfoInqireService/getSttnNoList (nodeNm 또는 nodeNo)
+   - 도착 정보   : /1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList (nodeId)
+   - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
+   ===================================================================== */
+
+const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
+// 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
+const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
+const DAY_NAMES = ["일","월","화","수","목","금","토"];
+
+/* ---------- 설정 저장 (안전한 저장소 래퍼: 사용 불가 환경에선 메모리+URL 해시) ---------- */
+const memStore = {};
+const store = {
+  get(k){ try { return window.localStorage.getItem(k); } catch(e){ return (k in memStore)? memStore[k] : null; } },
+  set(k,v){ try { window.localStorage.setItem(k,v); } catch(e){ memStore[k]=v; } }
+};
+
+let config = {
+  apiKey:"", stopId:"", stopName:"",
+  cityCode:23, cityName:"인천광역시",
+  buses:[],            // ["16","302"]
+  walkMin:5, prepMin:15,
+  start:"06:30", end:"09:00",
+  days:[1,2,3,4,5],    // 0=일
+  voice:true,          // 알람을 음성으로도 읽어주기
+  routeMap:{},         // (구버전 호환용)
+  manualMap:{}         // (구버전 호환용)
+};
+
+function loadConfig(){
+  // 1) URL 해시 우선
+  let fromHash = false;
+  if(location.hash.length > 1){
+    try{
+      const decoded = JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
+      config = Object.assign(config, decoded);
+      fromHash = true;
+    }catch(e){ /* 해시가 설정이 아니면 무시 */ }
+  }
+  // 2) 저장소 (해시가 없을 때만 일반 설정 로드)
+  if(!fromHash){
+    const raw = store.get("busAlarmCfg");
+    if(raw){ try{ config = Object.assign(config, JSON.parse(raw)); }catch(e){} }
+  }
+  // 3) API 키는 항상 별도 저장소에서 (해시에 키가 있으면 그걸 우선하고 별도 저장)
+  const savedKey = sanitizeKey(store.get("busAlarmApiKey"));
+  config.apiKey = sanitizeKey(config.apiKey);
+  if(config.apiKey){ store.set("busAlarmApiKey", config.apiKey); }
+  else if(savedKey){ config.apiKey = savedKey; }
+  if(!config.apiKey) config.apiKey = DEFAULT_API_KEY; // 키가 없으면 앱 내장 키 사용
+  if(fromHash) persistConfig();
+}
+function persistConfig(){
+  // API 키는 제외하고 저장 (키는 별도 보관)
+  const {apiKey, ...rest} = config;
+  store.set("busAlarmCfg", JSON.stringify(rest));
+  if(apiKey) store.set("busAlarmApiKey", apiKey);
+}
+function saveApiKey(){
+  const v = sanitizeKey(document.getElementById("in-apikey").value);
+  const st = document.getElementById("apikey-status");
+  if(!v){ st.textContent = "키를 입력해 주세요"; return; }
+  document.getElementById("in-apikey").value = v;
+  config.apiKey = v;
+  store.set("busAlarmApiKey", v);
+  st.textContent = "저장됨 (…" + v.slice(-4) + ")";
+}
+function configToHash(){
+  return "#" + btoa(unescape(encodeURIComponent(JSON.stringify(config))));
+}
+
+/* ---------- CORS 우회 fetch: 직접 → codetabs → allorigins → corsproxy 순서로 시도 ---------- */
+const FETCH_MODES = ["direct","codetabs","allorigins","corsproxy"];
+const MODE_LABEL = {direct:"직접 연결", codetabs:"우회1", allorigins:"우회2", corsproxy:"우회3"};
+let workingFetchMode = null; // 성공한 방식 기억
+function looksLikeApiXml(t){
+  return t && t.includes("<") && /OpenAPI_ServiceResponse|ServiceResult|resultCode|msgHeader|returnAuthMsg/i.test(t);
+}
+async function fetchText(url){
+  const modes = workingFetchMode ? [workingFetchMode, ...FETCH_MODES] : FETCH_MODES;
+  const tried = new Set();
+  const fails = [];
+  for(const mode of modes){
+    if(tried.has(mode)) continue;
+    tried.add(mode);
+    let target = url;
+    if(mode==="codetabs")   target = "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url);
+    if(mode==="allorigins") target = "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
+    if(mode==="corsproxy")  target = "https://corsproxy.io/?url=" + encodeURIComponent(url);
+    try{
+      // AbortSignal은 일부 환경(앱 내 미리보기 등)에서 오류를 일으켜 Promise.race로 시간제한 처리
+      const res = await Promise.race([
+        fetch(target, {cache:"no-store"}),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error("시간 초과")), 12000))
+      ]);
+      let text = "";
+      try{ text = await res.text(); }catch(e){}
+      // 상태코드가 에러여도 본문이 API 응답 XML이면 그대로 사용 (인증오류 등을 친절히 표시하기 위해)
+      if(looksLikeApiXml(text)){ workingFetchMode = mode; return text; }
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      if(text && text.length>0){ workingFetchMode = mode; return text; }
+      throw new Error("빈 응답");
+    }catch(e){
+      fails.push(MODE_LABEL[mode] + ": " + (e.name==="AbortError" ? "시간 초과" : e.message));
+    }
+  }
+  throw new Error(
+    "서버에 연결하지 못했어요.<br><span style='opacity:.8'>" + fails.join(" · ") + "</span><br><br>" +
+    "확인해 보세요:<br>" +
+    "① 공공데이터포털에서 <b>활용신청을 완료</b>했는지 (도착정보·정류소 조회 각각)<br>" +
+    "② 키 발급 직후라면 <b>30분~1시간 후</b> 다시 시도<br>" +
+    "③ 인터넷 연결 상태 확인 후 잠시 뒤 재시도 (우회 서버가 일시적으로 붐빌 수 있어요)"
+  );
+}
+
+/* ---------- API 키 정리: 공백·줄바꿈·따옴표·보이지 않는 문자 제거, URL째 붙여넣기 대응 ---------- */
+function sanitizeKey(v){
+  if(!v) return "";
+  let k = String(v)
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "");
+  const m = k.match(/serviceKey=([^&#]+)/i);
+  if(m) k = m[1];
+  return k;
+}
+/* ---------- API 키 처리: 인코딩된 키(% 포함)는 그대로, 아니면 인코딩 ---------- */
+function keyParam(){
+  const k = sanitizeKey(config.apiKey);
+  return k.includes("%") ? k : encodeURIComponent(k);
+}
+
+function apiErr(msg, opts){
+  const e = new Error(msg);
+  if(opts) Object.assign(e, opts); // retryable, nodata
+  return e;
+}
+/* TAGO API 호출(JSON) + 자동 재시도. 반환: 아이템 배열 (결과 없음이면 null) */
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+async function tagoCall(service, op, params){
+  let lastErr = null;
+  for(let attempt=0; attempt<3; attempt++){
+    const host = attempt===2 ? TAGO_HOST.replace("https://","http://") : TAGO_HOST;
+    try{
+      const q = "serviceKey=" + keyParam() + "&pageNo=1&numOfRows=200&_type=json&cityCode=" + ((provider()==="tago" && config.cityCode) || 23) +
+        Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
+      const text = await fetchText(host + "/" + service + "/" + op + "?" + q);
+      let data;
+      try{ data = JSON.parse(text); }
+      catch(e){ throw apiErr("응답 해석 실패: " + text.slice(0,160), {retryable:true}); }
+      // 게이트웨이 공통 오류 (인증·제공기관 연계)
+      const cmm = data.OpenAPI_ServiceResponse && data.OpenAPI_ServiceResponse.cmmMsgHeader;
+      if(cmm){
+        const code = String(cmm.returnReasonCode||"").trim();
+        const raw = String(cmm.errMsg || cmm.returnAuthMsg || "").trim();
+        if(code==="03" || /NODATA/i.test(raw)) return null;
+        if(["01","02","04","05"].includes(code) || /HTTP|TIMEOUT|APPLICATION|DB/i.test(raw))
+          throw apiErr("공공데이터 서버가 일시적으로 응답하지 못했어요 ("+raw+" "+code+"). 잠시 후 자동으로 다시 시도해요.", {retryable:true});
+        const msgMap = {
+          "30":"등록되지 않은 API 키예요.<br>① 공공데이터포털 <b>마이페이지 → 인증키 발급현황</b>에서 <b>일반 인증키(Decoding)</b>를 복사해 다시 붙여넣어 보세요.<br>② <b>국토교통부_(TAGO)_버스도착정보</b>와 <b>국토교통부_(TAGO)_버스정류소정보</b>에 각각 <b>활용신청</b>이 승인돼 있는지 확인해 주세요.<br>③ 발급·신청 직후라면 서버 반영까지 <b>30분~1시간</b> 걸릴 수 있어요.",
+          "31":"API 키 사용 기간이 만료됐어요. 공공데이터포털에서 연장 신청해 주세요.",
+          "32":"등록되지 않은 도메인/IP예요.",
+          "22":"오늘 API 호출 한도를 초과했어요. 내일 다시 시도해 주세요."
+        };
+        throw apiErr(msgMap[code] || ("API 인증 오류: " + raw + " (" + code + ")"));
+      }
+      const header = data.response && data.response.header;
+      if(!header) throw apiErr("알 수 없는 응답 형식: " + text.slice(0,120), {retryable:true});
+      const rc = String(header.resultCode);
+      if(rc!=="00" && rc!=="0"){
+        if(/NODATA|결과.?없/i.test(String(header.resultMsg||"")) || rc==="03"||rc==="3") return null;
+        throw apiErr("API 오류 ("+rc+"): " + (header.resultMsg||""), {retryable:true});
+      }
+      const items = data.response.body && data.response.body.items;
+      if(!items || !items.item) return [];
+      return Array.isArray(items.item) ? items.item : [items.item];
+    }catch(e){
+      if(e.nodata) return null;
+      lastErr = e;
+      if(!e.retryable) throw e; // 키 오류 등은 재시도 무의미
+      await sleep(1200 + attempt*800);
+    }
+  }
+  throw lastErr;
+}
+
+/* ---------- 정류소 검색 (이름 또는 정류소번호) ---------- */
+/* ---------- 지역별 제공자: 서울(S1)·경기(G41)는 자체 API, 나머지는 TAGO ---------- */
+function provider(){
+  const c = String(config.cityCode||"");
+  return c==="S1" ? "seoul" : c==="G41" ? "gyeonggi" : "tago";
+}
+/* 서울 버스 API (ws.bus.go.kr) */
+async function seoulCall(op, params){
+  let lastErr = null;
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const q = "serviceKey=" + keyParam() + "&resultType=json" +
+        Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
+      const text = await fetchText("http://ws.bus.go.kr/api/rest/" + op + "?" + q);
+      let data;
+      try{ data = JSON.parse(text); }
+      catch(e){ throw apiErr("서울 버스 API 응답 해석 실패: " + text.slice(0,120), {retryable:true}); }
+      const h = data.msgHeader || {};
+      const cd = String(h.headerCd);
+      if(cd==="0" || cd==="00"){
+        const items = data.msgBody && data.msgBody.itemList;
+        return items ? (Array.isArray(items) ? items : [items]) : [];
+      }
+      if(cd==="4" || /결과.?없|없습니다/.test(String(h.headerMsg||""))) return null;
+      if(cd==="7" || /인증|KEY/i.test(String(h.headerMsg||"")))
+        throw apiErr("서울 버스 API 인증 오류: " + (h.headerMsg||"") + "<br>신청 직후라면 서버 반영까지 30분~1시간 걸릴 수 있어요.");
+      throw apiErr("서울 버스 API 오류: " + (h.headerMsg||cd), {retryable:true});
+    }catch(e){
+      if(e.nodata) return null;
+      lastErr = e;
+      if(!e.retryable) throw e;
+      await sleep(1200 + attempt*800);
+    }
+  }
+  throw lastErr;
+}
+/* 경기도 버스 API (GBIS v2) */
+async function ggCall(path, params){
+  let lastErr = null;
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const q = "serviceKey=" + keyParam() + "&format=json" +
+        Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
+      const text = await fetchText("https://apis.data.go.kr/6410000/" + path + "?" + q);
+      let data;
+      try{ data = JSON.parse(text); }
+      catch(e){ throw apiErr("경기 버스 API 응답 해석 실패: " + text.slice(0,120), {retryable:true}); }
+      const cmm = data.OpenAPI_ServiceResponse && data.OpenAPI_ServiceResponse.cmmMsgHeader;
+      if(cmm){
+        const code = String(cmm.returnReasonCode||"").trim();
+        if(code==="30") throw apiErr("경기 버스 API 인증 오류. 신청 직후라면 서버 반영까지 30분~1시간 걸릴 수 있어요.");
+        throw apiErr("경기 버스 API 오류 (" + code + "): " + (cmm.errMsg||""), {retryable:true});
+      }
+      const h = (data.response && data.response.msgHeader) || {};
+      const rc = String(h.resultCode);
+      if(rc==="0" || rc==="00") return (data.response && data.response.msgBody) || {};
+      if(rc==="4" || /존재하지 않|결과.?없/.test(String(h.resultMessage||""))) return null;
+      throw apiErr("경기 버스 API 오류 (" + rc + "): " + (h.resultMessage||""), {retryable:true});
+    }catch(e){
+      if(e.nodata) return null;
+      lastErr = e;
+      if(!e.retryable) throw e;
+      await sleep(1200 + attempt*800);
+    }
+  }
+  throw lastErr;
+}
+function ggStopItems(list){
+  const arr = list ? (Array.isArray(list) ? list : [list]) : [];
+  return arr.filter(it=>it && it.stationId).map(it=>({
+    id: String(it.stationId),
+    nm: String(it.stationName||"") + (it.regionName ? " ("+it.regionName+")" : ""),
+    shortId: String(it.mobileNo||"").trim(),
+    admin: ""
+  }));
+}
+function seoulStopItems(items){
+  return (items||[]).filter(it=>it && it.arsId && String(it.arsId)!=="0").map(it=>({
+    id: String(it.arsId),
+    nm: String(it.stNm||""),
+    shortId: String(it.arsId),
+    admin: ""
+  }));
+}
+
+function stopItemsFromList(list){
+  const out = [];
+  for(const it of (list||[])){
+    if(!it || !it.nodeid) continue;
+    out.push({
+      id: String(it.nodeid),
+      nm: String(it.nodenm||""),
+      shortId: it.nodeno==null ? "" : String(it.nodeno),
+      admin: ""
+    });
+  }
+  return out;
+}
+function renderStopItems(box, stops, note){
+  let html = '<div class="stop-result">';
+  for(const s of stops.slice(0,40)){
+    const safeNm = (s.nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
+    html += `<div class="stop-item" onclick="pickStop('${s.id}','${safeNm}','${s.shortId}')">
+      <div><b>${s.nm||"(이름 없음)"}</b></div>
+      <div class="sid">정류소번호 ${s.shortId||"-"} · ID ${s.id}</div></div>`;
+  }
+  html += "</div><div class='muted' style='margin-top:6px'>" + (note||"") + "</div>";
+  box.innerHTML = html;
+}
+// 정류소번호(표지판 숫자)로 검색
+async function searchStopByNumber(num){
+  const p = provider();
+  if(p==="seoul"){
+    const items = await seoulCall("stationinfo/getStationByUid", {arsId:num});
+    if(!items || !items.length) return null;
+    return [{id:num, nm:String(items[0].stNm||("정류소 "+num)), shortId:num, admin:""}];
+  }
+  if(p==="gyeonggi"){
+    const body = await ggCall("busstationservice/v2/getBusStationListv2", {keyword:num});
+    const stops = ggStopItems(body && body.busStationList);
+    if(!stops.length) return null;
+    const exact = stops.filter(s => (s.shortId||"").replace(/\D/g,"") === num.replace(/^0+/,"") || (s.shortId||"").replace(/\D/g,"") === num);
+    return exact.length ? exact : stops;
+  }
+  const list = await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNo:num});
+  const stops = stopItemsFromList(list);
+  if(!stops.length) return null;
+  const exact = stops.filter(s => (s.shortId||"").replace(/\D/g,"") === num);
+  return exact.length ? exact : stops;
+}
+async function searchStop(){
+  const q = document.getElementById("in-stopname").value.trim();
+  const box = document.getElementById("stop-results");
+  if(!q){ box.innerHTML = '<div class="err">정류장 이름 또는 정류소번호를 입력해 주세요.</div>'; return; }
+  const key = sanitizeKey(document.getElementById("in-apikey").value) || sanitizeKey(config.apiKey);
+  if(!key){ box.innerHTML = '<div class="err">먼저 API 키를 입력해 주세요.</div>'; return; }
+  config.apiKey = key;
+  store.set("busAlarmApiKey", key);
+  box.innerHTML = '<div class="notice">검색 중…</div>';
+  const isNumber = /^\d{4,9}$/.test(q.replace(/\s/g,""));
+  try{
+    if(isNumber){
+      // ① 정류소번호로 검색
+      const stops = await searchStopByNumber(q.replace(/\s/g,""));
+      if(stops && stops.length){
+        renderStopItems(box, stops, "정류장 표지판의 번호와 일치하는지 확인하고 선택하세요.");
+        return;
+      }
+      box.innerHTML = '<div class="err">정류소번호 "'+q+'"로 결과를 찾지 못했어요. 정류장 <b>이름</b>으로 검색해 보세요. 결과 목록에 정류소번호가 함께 표시되니 번호로 방향을 확인하면 돼요.</div>';
+      return;
+    }
+    // ② 이름으로 검색
+    let stops;
+    const p = provider();
+    if(p==="seoul"){
+      stops = seoulStopItems(await seoulCall("stationinfo/getStationByName", {stSrch:q}));
+    }else if(p==="gyeonggi"){
+      const body = await ggCall("busstationservice/v2/getBusStationListv2", {keyword:q});
+      stops = ggStopItems(body && body.busStationList);
+    }else{
+      stops = stopItemsFromList(await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNm:q}));
+    }
+    if(stops.length===0){ box.innerHTML = '<div class="err">검색 결과가 없어요. 더 짧은 이름으로 검색해 보세요. (예: "풍림" 만 입력)</div>'; return; }
+    renderStopItems(box, stops, "같은 이름 정류장이 방향별로 2개 이상 있어요. 정류소번호(정류장 표지판의 5자리 숫자)로 <b>타는 방향</b>을 확인하고 선택하세요.");
+  }catch(e){
+    box.innerHTML = '<div class="err">' + e.message + '</div>';
+  }
+}
+function pickStop(id, name, shortId){
+  config.stopId = id;
+  config.stopName = name + (shortId ? " ("+shortId+")" : "");
+  const sel = document.getElementById("sel-stop");
+  sel.classList.remove("hidden");
+  sel.innerHTML = "선택됨: <b>" + config.stopName + "</b>";
+  document.getElementById("stop-results").innerHTML = "";
+}
+
+/* ---------- 도착 정보 (모든 제공자가 버스번호를 함께 반환) ---------- */
+function parseSeoulArrmsg(msg){
+  // 예: "3분후[2번째 전]", "12분12초후[5번째 전]", "곧 도착", "운행종료", "출발대기"
+  if(!msg) return null;
+  if(/곧 ?도착/.test(msg)) return {sec:30, stops:""};
+  const m = msg.match(/(\d+)분(?:(\d+)초)?\s*후/);
+  if(!m) return null;
+  const s = msg.match(/\[(\d+)번째 전\]/);
+  return {sec: parseInt(m[1],10)*60 + (m[2]?parseInt(m[2],10):0), stops: s?s[1]:""};
+}
+async function fetchArrivalsSeoul(){
+  const items = await seoulCall("stationinfo/getStationByUid", {arsId:config.stopId});
+  if(!items) return [];
+  const out = [];
+  for(const it of items){
+    for(const [msg, tr] of [[it.arrmsg1, it.traTime1],[it.arrmsg2, it.traTime2]]){
+      let sec = null, stops = "";
+      const parsed = parseSeoulArrmsg(String(msg||""));
+      if(parsed){ sec = parsed.sec; stops = parsed.stops; }
+      const t = parseInt(tr, 10);
+      if(!isNaN(t) && t>0) sec = t; // 초 단위 필드가 있으면 우선
+      if(sec==null) continue;
+      out.push({routeId:String(it.busRouteId||""), routeNo:String(it.rtNm||""), estSec:sec,
+        busId:"", plate:"", restStops:stops, lastStopName:"", low:"", lastBus:""});
+    }
+  }
+  return out;
+}
+async function fetchArrivalsGg(){
+  const body = await ggCall("busarrivalservice/v2/getBusArrivalListv2", {stationId:config.stopId});
+  const list = body && body.busArrivalList;
+  if(!list) return [];
+  const arr = Array.isArray(list) ? list : [list];
+  const out = [];
+  for(const it of arr){
+    const add = (sec, min, loc, low, plate) => {
+      let s = parseInt(sec, 10);
+      if(isNaN(s) || s<=0){
+        const m = parseInt(min, 10);
+        if(isNaN(m) || m<0) return;
+        s = m*60;
+      }
+      out.push({routeId:String(it.routeId||""), routeNo:String(it.routeName||""), estSec:s,
+        busId:String(plate||""), plate:String(plate||""), restStops: loc==null?"":String(loc),
+        lastStopName:"", low: String(low)==="1"?"1":"", lastBus:""});
+    };
+    add(it.predictTimeSec1, it.predictTime1, it.locationNo1, it.lowPlate1, it.plateNo1);
+    add(it.predictTimeSec2, it.predictTime2, it.locationNo2, it.lowPlate2, it.plateNo2);
+  }
+  return out;
+}
+async function fetchArrivals(){
+  const p = provider();
+  if(p==="seoul") return fetchArrivalsSeoul();
+  if(p==="gyeonggi") return fetchArrivalsGg();
+  const list = await tagoCall("ArvlInfoInqireService", "getSttnAcctoArvlPrearngeInfoList", {nodeId:config.stopId});
+  if(!list) return []; // 결과 없음 (운행 전 등)
+  const out = [];
+  for(const it of (list||[])){
+    const est = parseInt(it.arrtime, 10);
+    if(isNaN(est) || est<0) continue;
+    out.push({
+      routeId: String(it.routeid||""),
+      routeNo: it.routeno==null ? "" : String(it.routeno),
+      estSec: est, // 초 단위
+      busId: "",
+      plate: "",
+      restStops: it.arrprevstationcnt==null ? "" : String(it.arrprevstationcnt),
+      lastStopName: "",
+      low: /저상/.test(String(it.vehicletp||"")) ? "1" : "",
+      lastBus: ""
+    });
+  }
+  return out;
+}
+
+/* ---------- 출발 옵션 계산 ---------- */
+const normBusNo = s => String(s||"").replace(/\s/g,"").toUpperCase();
+async function computeOptions(){
+  const arrivals = await fetchArrivals();
+  lastArrivalsRaw = arrivals;
+
+  const wantedNos = config.buses.map(normBusNo);
+  const matched = new Set();
+  const opts = [];
+  for(const a of arrivals){
+    const i = wantedNos.indexOf(normBusNo(a.routeNo));
+    if(i < 0) continue;
+    matched.add(wantedNos[i]);
+    opts.push({...a, busNo: config.buses[i], departSec: a.estSec - config.walkMin*60});
+  }
+  opts.sort((x,y)=>x.departSec-y.departSec);
+  const unresolved = config.buses.filter(b => !matched.has(normBusNo(b)));
+  return {opts: opts.filter(o=>o.departSec > -120).slice(0,3), unresolved, matchedAny: matched.size>0};
+}
+
+/* ---------- 렌더링 ---------- */
+let lastArrivalsRaw = [];
+let lastFetchAt = null;
+let cachedOpts = [];
+
+function fmtClock(d){ return d.toTimeString().slice(0,8); }
+function fmtHM(d){ return (d.getHours()<10?"0":"")+d.getHours()+":"+(d.getMinutes()<10?"0":"")+d.getMinutes(); }
+function fmtMin(sec){
+  if(sec <= 30) return "지금";
+  const m = Math.round(sec/60);
+  return m + "분 뒤";
+}
+function render(){
+  const cardsEl = document.getElementById("cards");
+  const now = new Date();
+  if(!lastFetchAt){ cardsEl.innerHTML=""; return; }
+  const elapsed = (now - lastFetchAt)/1000;
+
+  let html = "";
+  let rank = 0;
+  for(const o of cachedOpts){
+    const dep = o.departSec - elapsed;
+    const arr = o.estSec - elapsed;
+    if(dep < -120) continue;
+    rank++;
+    const depTime = new Date(now.getTime() + dep*1000);
+    const arrTime = new Date(now.getTime() + arr*1000);
+    const color = dep <= 3*60 ? "var(--bad)" : dep <= 7*60 ? "var(--warn)" : "var(--good)";
+    const label = dep <= 0 ? "지금 출발!" : fmtMin(dep) + " 출발";
+    html += `
+    <div class="depart-card ${rank===1?"best":""}">
+      <div class="accentbar" style="background:${color}"></div>
+      <div style="margin-left:8px">
+        <div class="depart-main"><span class="busno">${o.busNo}</span>${label} <small>(${fmtHM(depTime)} 출발)</small></div>
+        <div class="depart-sub">
+          <span>${fmtHM(arrTime)} 정류장 도착 예정</span>
+          ${o.restStops?`<span>${o.restStops}정거장 전</span>`:""}
+          ${o.lastStopName?`<span>(${o.lastStopName} 통과)</span>`:""}
+          ${o.low==="1"?`<span>저상</span>`:""}
+          ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
+        </div>
+      </div>
+    </div>`;
+  }
+  if(rank===0 && lastFetchAt){
+    html = '<div class="notice">지금은 설정한 버스의 도착 정보가 없어요. (운행 전이거나 간격이 긴 시간대일 수 있어요)</div>';
+  }
+  cardsEl.innerHTML = html;
+
+  // 원본 데이터
+  const raw = document.getElementById("rawlist");
+  raw.innerHTML = lastArrivalsRaw.length
+    ? lastArrivalsRaw.map(a=>`${a.routeNo||"?"}번 · ${Math.round((a.estSec-elapsed)/60)}분 후 도착 · ${a.restStops||"?"}정거장 전`).join("<br>")
+    : "데이터 없음";
+}
+
+/* ---------- 설정한 버스가 지금 접근 중이 아닐 때 안내 ---------- */
+function renderUnmatched(unresolved){
+  const el = document.getElementById("unmatched-hint");
+  if(!unresolved || unresolved.length===0){ el.innerHTML=""; el.dataset.sig=""; return; }
+  const nowNos = [...new Set(lastArrivalsRaw.map(a=>a.routeNo).filter(Boolean))];
+  const sig = unresolved.join(",") + "|" + nowNos.sort().join(",");
+  if(el.dataset.sig === sig && el.innerHTML) return;
+  el.dataset.sig = sig;
+  el.innerHTML = `<div class="notice"><b>${unresolved.join(", ")}</b>번은 지금 이 정류장에 접근 중인 차가 없어요.
+  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}
+  <br><span class="muted">버스번호가 계속 안 잡히면 설정의 버스번호가 정류장 노선과 정확히 일치하는지 확인해 주세요.</span></div>`;
+}
+
+/* ---------- 알림 ---------- */
+const notified = new Set(); // "busId|stage" 중복 방지
+function askNotifPerm(){
+  if(!("Notification" in window)){ alert("이 브라우저는 알림을 지원하지 않아요."); return; }
+  Notification.requestPermission().then(updatePermBanner);
+}
+function updatePermBanner(){
+  const b = document.getElementById("alarm-perm");
+  if(("Notification" in window) && Notification.permission!=="granted") b.classList.remove("hidden");
+  else b.classList.add("hidden");
+}
+function beep(times){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    for(let i=0;i<times;i++){
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880; g.gain.value = 0.25;
+      o.start(ctx.currentTime + i*0.35); o.stop(ctx.currentTime + i*0.35 + 0.2);
+    }
+  }catch(e){}
+}
+/* 음성 안내 (Web Speech API) */
+function speak(text){
+  if(config.voice===false) return;
+  try{
+    if(!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "ko-KR"; u.rate = 1.0;
+    const ko = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith("ko"));
+    if(ko) u.voice = ko;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function testVoice(){
+  config.voice = document.getElementById("in-voice").checked;
+  if(!config.voice){ return; }
+  speak("223번 버스, 3분 뒤에 출발하세요.");
+}
+function notify(title, body, soundTimes, speech){
+  beep(soundTimes||2);
+  if(speech) speak(speech);
+  if(("Notification" in window) && Notification.permission==="granted"){
+    try{ new Notification(title,{body, tag:title+body}); }catch(e){}
+  }
+}
+function checkAlarms(){
+  if(!inWindow()) return;
+  const now = new Date();
+  if(!lastFetchAt) return;
+  const elapsed = (now-lastFetchAt)/1000;
+  for(const o of cachedOpts){
+    const dep = o.departSec - elapsed;
+    const key = (o.busId||o.routeId) + "|";
+    const depTime = fmtHM(new Date(now.getTime()+dep*1000));
+    const depMin = Math.round(dep/60);
+    if(dep > 0 && dep <= config.prepMin*60 && !notified.has(key+"prep")){
+      notified.add(key+"prep");
+      notify("준비 시작 · "+o.busNo+"번", fmtMin(dep)+" ("+depTime+") 출발하면 탈 수 있어요", 2,
+        o.busNo+"번 버스, "+depMin+"분 뒤에 출발해야 해요. 준비를 시작하세요.");
+    }
+    if(dep > 0 && dep <= 3*60 && !notified.has(key+"soon")){
+      notified.add(key+"soon");
+      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
+        o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요.");
+    }
+    if(dep <= 30 && dep > -60 && !notified.has(key+"now")){
+      notified.add(key+"now");
+      notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
+        o.busNo+"번 버스, 지금 출발하세요!");
+    }
+  }
+}
+
+/* ---------- 자동 새로고침 루프 ---------- */
+let autoOn = false;
+let refreshTimer = null;
+let fetching = false;
+
+function inWindow(){
+  const now = new Date();
+  if(!config.days.includes(now.getDay())) return false;
+  const cur = now.getHours()*60+now.getMinutes();
+  const [sh,sm]=config.start.split(":").map(Number);
+  const [eh,em]=config.end.split(":").map(Number);
+  return cur >= sh*60+sm && cur <= eh*60+em;
+}
+async function doFetch(){
+  if(fetching || !config.stopId || !config.apiKey) return;
+  fetching = true;
+  setStatus("확인 중…", true);
+  document.getElementById("err-box").innerHTML="";
+  try{
+    const {opts, unresolved} = await computeOptions();
+    cachedOpts = opts;
+    lastFetchAt = new Date();
+    render();
+    renderUnmatched(unresolved);
+    checkAlarms();
+    setStatus("업데이트: " + fmtClock(lastFetchAt), autoOn);
+  }catch(e){
+    document.getElementById("err-box").innerHTML = '<div class="err">'+e.message+'</div>';
+    setStatus("오류 발생", false);
+  }
+  fetching = false;
+}
+function manualRefresh(){ doFetch(); }
+function toggleAuto(){
+  autoOn = !autoOn;
+  const btn = document.getElementById("btn-auto");
+  if(autoOn){
+    btn.textContent = "자동 새로고침 중지";
+    doFetch();
+    keepAwake();
+  }else{
+    btn.textContent = "자동 새로고침 시작";
+    setStatus("대기 중", false);
+  }
+}
+function setStatus(t, live){
+  document.getElementById("status-text").textContent = t + (autoOn && !inWindow() ? " (알람 시간대 밖)" : "");
+  document.getElementById("live-dot").className = "dot" + (live?" live":"");
+}
+async function keepAwake(){
+  try{ if("wakeLock" in navigator) await navigator.wakeLock.request("screen"); }catch(e){}
+}
+// 1초 틱: 시계/카운트다운 갱신, 30초마다 재조회
+let tick = 0;
+setInterval(()=>{
+  document.getElementById("clock").textContent = fmtClock(new Date());
+  if(lastFetchAt) render();
+  tick++;
+  if(autoOn && tick % 30 === 0 && inWindow()) doFetch();
+  if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
+},1000);
+
+/* ---------- 화면 전환 & 설정 폼 ---------- */
+function showView(v){
+  document.getElementById("view-home").classList.toggle("hidden", v!=="home");
+  document.getElementById("view-settings").classList.toggle("hidden", v!=="settings");
+  document.getElementById("tab-home").classList.toggle("on", v==="home");
+  document.getElementById("tab-settings").classList.toggle("on", v==="settings");
+  if(v==="settings") fillForm();
+}
+/* ---------- 지역(도시) 목록 ---------- */
+let cityListLoaded = false;
+async function loadCityList(){
+  if(cityListLoaded) return;
+  const sel = document.getElementById("in-city");
+  let list = null;
+  try{
+    const cached = JSON.parse(store.get("busAlarmCities")||"null");
+    if(cached && cached.list && cached.list.length && (Date.now()-cached.ts) < 30*24*3600*1000) list = cached.list;
+  }catch(e){}
+  if(!list){
+    try{
+      const items = await tagoCall("BusSttnInfoInqireService","getCtyCodeList",{});
+      if(items && items.length){
+        list = items.map(it=>({code:String(it.citycode), name:String(it.cityname||"")})).filter(c=>c.code && c.name);
+        store.set("busAlarmCities", JSON.stringify({ts:Date.now(), list}));
+      }
+    }catch(e){ /* 목록 로드 실패 시 기존 옵션 유지, 다음에 재시도 */ return; }
+  }
+  if(!list || !list.length) return;
+  list.sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+  // 서울·경기는 자체 버스정보 시스템 사용 (TAGO 목록에 없음)
+  const full = [{code:"S1",name:"서울특별시"},{code:"G41",name:"경기도"}].concat(list);
+  sel.innerHTML = full.map(c=>`<option value="${c.code}">${c.name}</option>`).join("");
+  sel.value = String(config.cityCode||23);
+  if(!sel.value) sel.value = "23";
+  cityListLoaded = true;
+}
+function cityChanged(){
+  const sel = document.getElementById("in-city");
+  if(String(config.cityCode) === sel.value) return;
+  config.cityCode = sel.value; // 숫자(TAGO) 또는 "S1"(서울)/"G41"(경기)
+  config.cityName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : "";
+  // 지역이 바뀌면 이전 정류장 선택은 무효
+  config.stopId = ""; config.stopName = "";
+  document.getElementById("sel-stop").classList.add("hidden");
+  document.getElementById("sel-stop").innerHTML = "";
+  document.getElementById("stop-results").innerHTML = "";
+  document.getElementById("in-stopname").value = "";
+  persistConfig();
+  updateSetupHint();
+}
+
+function fillForm(){
+  loadCityList();
+  const customKey = config.apiKey && config.apiKey !== DEFAULT_API_KEY;
+  document.getElementById("in-apikey").value = customKey ? config.apiKey : "";
+  document.getElementById("apikey-status").textContent = customKey ? "직접 설정한 키 사용 중 (…" + config.apiKey.slice(-4) + ")" : "앱 내장 키 사용 중";
+  document.getElementById("in-voice").checked = config.voice !== false;
+  document.getElementById("in-buses").value = config.buses.join(", ");
+  document.getElementById("in-walk").value = config.walkMin;
+  document.getElementById("in-prep").value = config.prepMin;
+  document.getElementById("in-start").value = config.start;
+  document.getElementById("in-end").value = config.end;
+  if(config.stopId){
+    const sel = document.getElementById("sel-stop");
+    sel.classList.remove("hidden");
+    sel.innerHTML = "선택됨: <b>" + config.stopName + "</b>";
+  }
+  renderDayChips();
+}
+function renderDayChips(){
+  const el = document.getElementById("daychips");
+  el.innerHTML = DAY_NAMES.map((n,i)=>
+    `<span class="chip ${config.days.includes(i)?"on":""}" onclick="toggleDay(${i})">${n}</span>`).join("");
+}
+function toggleDay(i){
+  if(config.days.includes(i)) config.days = config.days.filter(d=>d!==i);
+  else config.days.push(i);
+  renderDayChips();
+}
+function saveSettings(){
+  config.apiKey = sanitizeKey(document.getElementById("in-apikey").value) || DEFAULT_API_KEY;
+  config.buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
+  config.walkMin = Math.max(0, parseInt(document.getElementById("in-walk").value||"0",10));
+  config.prepMin = Math.max(0, parseInt(document.getElementById("in-prep").value||"0",10));
+  config.start = document.getElementById("in-start").value || "06:30";
+  config.end = document.getElementById("in-end").value || "09:00";
+  config.voice = document.getElementById("in-voice").checked;
+  persistConfig();
+  if(!config.stopId || config.buses.length===0){
+    alert("정류장과 버스번호를 입력해 주세요.");
+    return;
+  }
+  showView("home");
+  updateSetupHint();
+  askNotifPerm();
+  doFetch();
+}
+function copyConfigLink(){
+  saveQuiet();
+  const link = location.origin === "null" || location.protocol==="file:"
+    ? location.href.split("#")[0] + configToHash()
+    : location.href.split("#")[0] + configToHash();
+  history.replaceState(null,"",configToHash());
+  const doCopy = (t)=>{
+    if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
+    return Promise.reject();
+  };
+  doCopy(link).then(()=>alert("복사됐어요! 브라우저 즐겨찾기에 추가해 두세요."))
+    .catch(()=>prompt("아래 링크를 복사해서 즐겨찾기 하세요:", link));
+}
+function saveQuiet(){
+  config.apiKey = sanitizeKey(document.getElementById("in-apikey").value) || config.apiKey;
+  const buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
+  if(buses.length) config.buses = buses;
+  persistConfig();
+}
+function updateSetupHint(){
+  const need = !config.stopId || config.buses.length===0;
+  document.getElementById("home-setup-hint").classList.toggle("hidden", !need);
+}
+
+/* ---------- 초기화 ---------- */
+loadConfig();
+fillForm();
+updateSetupHint();
+updatePermBanner();
+if(config.apiKey && config.stopId && config.buses.length){
+  doFetch();
+  if(inWindow()) toggleAuto();
+}else{
+  showView("settings");
+}
+</script>
+<script>
+if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="127.0.0.1" || location.hostname==="localhost")){
+  navigator.serviceWorker.register("sw.js").catch(function(){});
+}
+</script>
+</body>
+</html>
