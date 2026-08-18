@@ -220,7 +220,7 @@ if(location.hostname === "busgak.github.io"){
     <div style="margin-top:12px">
       <label class="switch" style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
         <input type="checkbox" id="in-push" onchange="syncPush()" style="width:18px; height:18px; accent-color:var(--btn-bg);">
-        앱이 꺼져 있어도 알림 받기
+        이 프로필: 앱 꺼져 있어도 자동 푸시 받기
       </label>
       <div id="push-status" class="muted" style="margin-top:5px"></div>
     </div>
@@ -263,7 +263,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v39";
+const APP_VERSION = "v40";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -284,6 +284,7 @@ let config = {
   start:"06:30", end:"09:00",
   days:[1,2,3,4,5],    // 0=일
   voice:true,          // 알람을 음성으로도 읽어주기
+  pushOn:false,        // 이 프로필의 자동 푸시(앱 꺼져 있을 때) 여부
   routeMap:{},         // (구버전 호환용)
   manualMap:{}         // (구버전 호환용)
 };
@@ -346,6 +347,12 @@ function initProfiles(){
   }else{
     if(typeof profiles.active !== "number" || !profiles.list[profiles.active]) profiles.active = 0;
     Object.assign(config, JSON.parse(JSON.stringify(profiles.list[profiles.active].data)));
+  }
+  // 구버전 전역 푸시 설정 → 활성 프로필로 이전
+  if(store.get("busAlarmPushOn") === "1"){
+    config.pushOn = true;
+    store.set("busAlarmPushOn", "");
+    persistConfig();
   }
 }
 function applyProfile(i){
@@ -1385,8 +1392,9 @@ function fillForm(){
     pushBox.disabled = true;
     pushSt.textContent = "설치된 앱(busgak.github.io)에서 사용할 수 있어요";
   }else{
-    pushBox.checked = store.get("busAlarmPushOn") === "1";
-    pushSt.textContent = pushBox.checked ? "켜짐 · 현재 프로필 기준으로 알림이 와요" : "";
+    pushBox.checked = config.pushOn === true;
+    const names = pushOnProfileNames();
+    pushSt.textContent = names.length ? "푸시 켜진 프로필: " + names.join(", ") : "";
   }
   document.getElementById("in-buses").value = config.buses.join(", ");
   document.getElementById("in-walk").value = config.walkMin;
@@ -1532,10 +1540,41 @@ function urlB64ToU8(s){
 function pushSupported(){
   return ("serviceWorker" in navigator) && ("PushManager" in window) && location.protocol === "https:";
 }
-function pushSettingsPayload(){
-  return {cityCode: config.cityCode, stopId: config.stopId, stopIds: config.stopIds || [],
-    stopName: config.stopName, buses: config.buses, walkMin: config.walkMin,
-    start: config.start, end: config.end, days: config.days};
+/* 푸시 켜진 프로필 목록 (활성 프로필은 현재 config 기준) */
+function pushProfilesPayload(){
+  const list = [];
+  if(!profiles || !profiles.list) return list;
+  profiles.list.forEach((p, i) => {
+    const d = (i === profiles.active) ? config : p.data;
+    if(d && d.pushOn && d.stopId && d.buses && d.buses.length){
+      list.push({name: p.name, cityCode: d.cityCode, stopId: d.stopId, stopIds: d.stopIds || [],
+        stopName: d.stopName, buses: d.buses, walkMin: d.walkMin,
+        start: d.start, end: d.end, days: d.days});
+    }
+  });
+  return list;
+}
+function pushOnProfileNames(){
+  if(!profiles || !profiles.list) return [];
+  return profiles.list.filter((p,i) => ((i===profiles.active) ? config : p.data).pushOn).map(p=>p.name);
+}
+/* 푸시 켜진 프로필들을 서버에 등록 (없으면 구독 해제) */
+async function syncPushToServer(){
+  const list = pushProfilesPayload();
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if(!list.length){
+    if(sub){
+      try{ await fetch(PUSH_SERVER + "/unsubscribe", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({endpoint: sub.endpoint})}); }catch(e){}
+      try{ await sub.unsubscribe(); }catch(e){}
+    }
+    return 0;
+  }
+  if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC_KEY)});
+  const res = await fetch(PUSH_SERVER + "/subscribe", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({sub: sub.toJSON(), profiles: list})});
+  if(!res.ok) throw new Error("서버 응답 " + res.status);
+  return list.length;
 }
 async function syncPush(){
   const box = document.getElementById("in-push");
@@ -1546,42 +1585,24 @@ async function syncPush(){
     return;
   }
   try{
+    config.pushOn = box.checked; // 이 프로필의 설정
+    persistConfig();
     if(box.checked){
       const perm = await Notification.requestPermission();
-      if(perm !== "granted"){ box.checked = false; st.textContent = "알림 권한이 필요해요 (브라우저 설정에서 허용)"; return; }
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC_KEY)});
-      const res = await fetch(PUSH_SERVER + "/subscribe", {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({sub: sub.toJSON(), settings: pushSettingsPayload()})});
-      if(!res.ok) throw new Error("서버 응답 " + res.status);
-      store.set("busAlarmPushOn", "1");
-      st.textContent = "켜짐 · 현재 프로필(" + (profiles ? profiles.list[profiles.active].name : "") + ") 기준으로 알림이 와요";
-    }else{
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if(sub){
-        try{ await fetch(PUSH_SERVER + "/unsubscribe", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({endpoint: sub.endpoint})}); }catch(e){}
-        await sub.unsubscribe();
-      }
-      store.set("busAlarmPushOn", "");
-      st.textContent = "꺼짐";
+      if(perm !== "granted"){ box.checked = false; config.pushOn = false; persistConfig(); st.textContent = "알림 권한이 필요해요 (브라우저 설정에서 허용)"; return; }
     }
+    const n = await syncPushToServer();
+    const names = pushOnProfileNames();
+    st.textContent = n ? "푸시 켜진 프로필: " + names.join(", ") : "모든 프로필 푸시 꺼짐";
   }catch(e){
-    box.checked = false;
+    box.checked = false; config.pushOn = false; persistConfig();
     st.textContent = "설정 실패: " + e.message;
   }
 }
 /* 설정·프로필이 바뀌면 서버에도 조용히 반영 */
 async function quietPushSync(){
-  if(store.get("busAlarmPushOn") !== "1" || !pushSupported()) return;
-  try{
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    if(!sub) return;
-    await fetch(PUSH_SERVER + "/subscribe", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({sub: sub.toJSON(), settings: pushSettingsPayload()})});
-  }catch(e){}
+  if(!pushSupported()) return;
+  try{ await syncPushToServer(); }catch(e){}
 }
 
 /* ---------- 의견 보내기 (URL을 채우면 설정 탭에 버튼이 나타남) ---------- */
