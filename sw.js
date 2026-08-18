@@ -1,5 +1,5 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v15";
+const CACHE = "bus-alarm-v16";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -10,6 +10,22 @@ self.addEventListener("activate", e => {
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+/* 서버 푸시 수신 → 시스템 알림 표시 */
+self.addEventListener("push", e => {
+  let d = {};
+  try { d = e.data.json(); } catch (err) { d = { title: "버스각", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "버스각", {
+    body: d.body || "", tag: d.tag || "busgak", icon: "icon-192.png", badge: "icon-192.png",
+    vibrate: [200, 100, 200], renotify: true
+  }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ("focus" in c) return c.focus(); }
+    return clients.openWindow("./");
+  }));
 });
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);

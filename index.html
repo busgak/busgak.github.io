@@ -212,6 +212,13 @@ if(location.hostname === "busgak.github.io"){
       </label>
       <button class="btn small secondary" type="button" onclick="testVoice()">들어보기</button>
     </div>
+    <div style="margin-top:12px">
+      <label class="switch" style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
+        <input type="checkbox" id="in-push" onchange="syncPush()" style="width:18px; height:18px; accent-color:var(--btn-bg);">
+        앱이 꺼져 있어도 알림 받기
+      </label>
+      <div id="push-status" class="muted" style="margin-top:5px"></div>
+    </div>
   </div>
 
   <button class="btn" onclick="saveSettings()">설정 저장</button>
@@ -340,9 +347,10 @@ function applyProfile(i){
   Object.assign(config, JSON.parse(JSON.stringify(profiles.list[i].data)));
   saveProfiles();
   persistConfig();
-  notified.clear();
+  notified.clear(); lastAlarmAt.clear();
   alarmsArmed = false; // 전환 직후 첫 확인은 조용히
   cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
+  quietPushSync(); // 푸시 설정도 새 프로필 기준으로 갱신
   renderProfileChips(); fillForm(); updateSetupHint(); render();
   document.getElementById("unmatched-hint").innerHTML = "";
   doFetch();
@@ -925,28 +933,34 @@ function notify(title, body, soundTimes, speech){
   }
 }
 // 앱을 연 직후 첫 확인에서는 이미 조건에 든 버스를 조용히 등록만 하고,
-// 그 이후 새로 조건에 진입하는 버스만 알린다 (열자마자 알람이 울리는 것 방지)
+// 그 이후 새로 조건에 진입하는 버스만 알린다 (열자마자 알람이 울리는 것 방지).
+// 알림 기록은 노선번호+단계별 "최근 4분" 기준 → 같은 노선의 다음 버스는 다시 울린다.
 let alarmsArmed = false;
+const lastAlarmAt = new Map(); // "버스번호|단계" -> epoch ms
 function checkAlarms(){
-  const now = new Date();
   if(!lastFetchAt) return;
+  const now = new Date();
+  const nowMs = now.getTime();
   const inWin = inWindow();
   const elapsed = (now-lastFetchAt)/1000;
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
-    const key = (o.busId||o.routeId) + "|";
-    const depTime = fmtHM(new Date(now.getTime()+dep*1000));
+    const depTime = fmtHM(new Date(nowMs + dep*1000));
     const depMin = Math.round(dep/60);
-    if(dep > 0 && dep <= 3*60 && !notified.has(key+"soon")){
-      notified.add(key+"soon");
-      if(alarmsArmed && inWin) notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
-        o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요.");
-    }
-    if(dep <= 30 && dep > -60 && !notified.has(key+"now")){
-      notified.add(key+"now");
-      if(alarmsArmed && inWin) notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
-        o.busNo+"번 버스, 지금 출발하세요!");
-    }
+    const tryFire = (stage, fn) => {
+      const k = normBusNo(o.busNo) + "|" + stage;
+      if(nowMs - (lastAlarmAt.get(k)||0) < 4*60*1000) return; // 4분 내 중복 방지 (도착예측 흔들림 대응)
+      if(!alarmsArmed){ lastAlarmAt.set(k, nowMs); return; }  // 첫 확인: 조용히 등록만
+      if(!inWin) return;                                       // 알람 시간대 밖: 울리지도, 소모하지도 않음
+      lastAlarmAt.set(k, nowMs);
+      fn();
+    };
+    if(dep > 0 && dep <= 3*60) tryFire("soon", () =>
+      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
+        o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요."));
+    if(dep <= 30 && dep > -60) tryFire("now", () =>
+      notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
+        o.busNo+"번 버스, 지금 출발하세요!"));
   }
   alarmsArmed = true;
 }
@@ -1071,6 +1085,15 @@ function cityChanged(){
 function fillForm(){
   loadCityList();
   document.getElementById("in-voice").checked = config.voice !== false;
+  const pushBox = document.getElementById("in-push");
+  const pushSt = document.getElementById("push-status");
+  if(!pushSupported()){
+    pushBox.disabled = true;
+    pushSt.textContent = "설치된 앱(busgak.github.io)에서 사용할 수 있어요";
+  }else{
+    pushBox.checked = store.get("busAlarmPushOn") === "1";
+    pushSt.textContent = pushBox.checked ? "켜짐 · 현재 프로필 기준으로 알림이 와요" : "";
+  }
   document.getElementById("in-buses").value = config.buses.join(", ");
   document.getElementById("in-walk").value = config.walkMin;
   document.getElementById("in-start").value = config.start;
@@ -1100,6 +1123,7 @@ function saveSettings(){
   config.end = document.getElementById("in-end").value || "09:00";
   config.voice = document.getElementById("in-voice").checked;
   persistConfig();
+  quietPushSync(); // 푸시 켜져 있으면 서버 설정도 갱신
   if(!config.stopId || config.buses.length===0){
     alert("정류장과 버스번호를 입력해 주세요.");
     return;
@@ -1200,6 +1224,69 @@ async function doInstall(){
 function dismissInstall(){
   store.set("busAlarmInstallDismiss", String(Date.now()));
   document.getElementById("install-modal").classList.add("hidden");
+}
+
+/* ---------- 서버 푸시: 앱이 꺼져 있어도 알림 ---------- */
+const PUSH_SERVER = "https://busgak-push.busgak-push.workers.dev";
+const VAPID_PUBLIC_KEY = "BD261ORTx7CaFCNLdcBwPrZJtpU5rHfVMfPYGSqzsN8Ge-sgP3jnLbWiZm0Ui9_QvcLDE0kO_L1hESYAMbjy9S4";
+function urlB64ToU8(s){
+  const pad = "=".repeat((4 - s.length % 4) % 4);
+  const b = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...b].map(c => c.charCodeAt(0)));
+}
+function pushSupported(){
+  return ("serviceWorker" in navigator) && ("PushManager" in window) && location.protocol === "https:";
+}
+function pushSettingsPayload(){
+  return {cityCode: config.cityCode, stopId: config.stopId, stopIds: config.stopIds || [],
+    stopName: config.stopName, buses: config.buses, walkMin: config.walkMin,
+    start: config.start, end: config.end, days: config.days};
+}
+async function syncPush(){
+  const box = document.getElementById("in-push");
+  const st = document.getElementById("push-status");
+  if(!pushSupported()){
+    box.checked = false;
+    st.textContent = "설치된 앱(busgak.github.io)에서만 사용할 수 있어요";
+    return;
+  }
+  try{
+    if(box.checked){
+      const perm = await Notification.requestPermission();
+      if(perm !== "granted"){ box.checked = false; st.textContent = "알림 권한이 필요해요 (브라우저 설정에서 허용)"; return; }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC_KEY)});
+      const res = await fetch(PUSH_SERVER + "/subscribe", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({sub: sub.toJSON(), settings: pushSettingsPayload()})});
+      if(!res.ok) throw new Error("서버 응답 " + res.status);
+      store.set("busAlarmPushOn", "1");
+      st.textContent = "켜짐 · 현재 프로필(" + (profiles ? profiles.list[profiles.active].name : "") + ") 기준으로 알림이 와요";
+    }else{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        try{ await fetch(PUSH_SERVER + "/unsubscribe", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({endpoint: sub.endpoint})}); }catch(e){}
+        await sub.unsubscribe();
+      }
+      store.set("busAlarmPushOn", "");
+      st.textContent = "꺼짐";
+    }
+  }catch(e){
+    box.checked = false;
+    st.textContent = "설정 실패: " + e.message;
+  }
+}
+/* 설정·프로필이 바뀌면 서버에도 조용히 반영 */
+async function quietPushSync(){
+  if(store.get("busAlarmPushOn") !== "1" || !pushSupported()) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(!sub) return;
+    await fetch(PUSH_SERVER + "/subscribe", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({sub: sub.toJSON(), settings: pushSettingsPayload()})});
+  }catch(e){}
 }
 
 /* ---------- 의견 보내기 (URL을 채우면 설정 탭에 버튼이 나타남) ---------- */
