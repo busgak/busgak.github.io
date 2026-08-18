@@ -134,7 +134,8 @@ if(location.hostname === "busgak.github.io"){
   </div>
   <div id="profile-chips-home" style="margin-bottom:10px"></div>
   <div id="home-setup-hint" class="notice hidden">
-    먼저 <b>설정 탭</b>에서 정류장과 버스번호를 입력해 주세요.
+    정류장과 버스번호를 등록하면 나가야 할 타이밍을 알려드려요.
+    <button class="btn small" style="display:block; margin-top:10px" onclick="showView('settings')">설정하러 가기</button>
   </div>
   <div id="alarm-perm" class="notice hidden">
     알림 권한이 필요해요. <button class="btn small" style="margin-left:6px" onclick="askNotifPerm()">알림 켜기</button>
@@ -1176,11 +1177,10 @@ fillForm();
 updateSetupHint();
 maybeShowInstall();
 updatePermBanner();
+// 첫 화면은 항상 홈 (미설정이면 홈의 안내가 설정 탭으로 유도)
 if(config.apiKey && config.stopId && config.buses.length){
   doFetch();
   keepAwake();
-}else{
-  showView("settings");
 }
 </script>
 <script>
@@ -1189,7 +1189,7 @@ if("serviceWorker" in navigator && (location.protocol==="https:" || location.hos
   var swReloaded = false;
   navigator.serviceWorker.addEventListener("controllerchange", function(){
     if(swReloaded) return; swReloaded = true;
-    location.reload(); // 새 버전 서비스워커가 활성화되면 즉시 새 버전으로 갱신
+    location.reload();
   });
 }
 </script>
