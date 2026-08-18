@@ -132,6 +132,7 @@ if(location.hostname === "busgak.github.io"){
     <span><span id="live-dot" class="dot"></span><span id="status-text">대기 중</span></span>
     <span class="bigclock" id="clock">--:--:--</span>
   </div>
+  <div id="profile-chips-home" style="margin-bottom:10px"></div>
   <div id="home-setup-hint" class="notice hidden">
     먼저 <b>설정 탭</b>에서 정류장과 버스번호를 입력해 주세요.
   </div>
@@ -142,7 +143,6 @@ if(location.hostname === "busgak.github.io"){
   <div id="cards"></div>
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
-  <button class="btn secondary" id="btn-auto" onclick="toggleAuto()">자동 새로고침 시작</button>
   <details>
     <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
     <div id="rawlist" class="muted" style="margin-top:8px"></div>
@@ -151,6 +151,18 @@ if(location.hostname === "busgak.github.io"){
 
 <!-- ================= SETTINGS ================= -->
 <div id="view-settings" class="hidden">
+
+  <div class="card">
+    <h2>프로필 · 출발 장소별 설정</h2>
+    <div id="profile-chips-set"></div>
+    <div class="muted" style="margin-top:8px">
+      집·회사처럼 장소마다 정류장과 시간을 다르게 저장할 수 있어요. 아래 설정은 <b>선택된 프로필</b>에 저장돼요.
+    </div>
+    <div style="display:flex; gap:6px; margin-top:10px;">
+      <button class="btn small secondary" onclick="renameProfile()">이름 변경</button>
+      <button class="btn small secondary" onclick="deleteProfile()">프로필 삭제</button>
+    </div>
+  </div>
 
   <div class="card">
     <h2>1. 버스 정류장</h2>
@@ -209,22 +221,9 @@ if(location.hostname === "busgak.github.io"){
   <button class="btn secondary" onclick="copyConfigLink()">설정 링크 복사 (즐겨찾기용)</button>
   <button class="btn secondary hidden" id="btn-feedback" onclick="window.open(FEEDBACK_URL,'_blank')">의견 보내기 (개선 요청)</button>
   <div class="muted" style="margin-top:10px">
-    저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정이 담긴 링크」를
-    즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요. (링크에 API 키가 포함되니 다른 사람과 공유하지 마세요!)
+    저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정 링크」를
+    즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요.
   </div>
-
-  <details style="margin-top:14px">
-    <summary>고급: 다른 API 키 사용</summary>
-    <div class="card" style="margin-top:10px">
-      <label>공공데이터포털 일반 인증키 (기본은 앱 내장 키)</label>
-      <input type="password" id="in-apikey" placeholder="비워두면 앱 내장 키를 사용해요">
-      <button class="btn small secondary" style="margin-top:10px" onclick="saveApiKey()">API 키만 저장</button>
-      <span id="apikey-status" class="muted" style="margin-left:8px"></span>
-      <div class="muted" style="margin-top:8px">
-        직접 발급한 키를 쓰려면 data.go.kr에서 「국토교통부_(TAGO)_버스도착정보」와 「국토교통부_(TAGO)_버스정류소정보」를 활용신청하세요.
-      </div>
-    </div>
-  </details>
 </div>
 
 <!-- ================= 설치 안내 모달 ================= -->
@@ -307,18 +306,81 @@ function persistConfig(){
   const {apiKey, ...rest} = config;
   store.set("busAlarmCfg", JSON.stringify(rest));
   if(apiKey) store.set("busAlarmApiKey", apiKey);
-}
-function saveApiKey(){
-  const v = sanitizeKey(document.getElementById("in-apikey").value);
-  const st = document.getElementById("apikey-status");
-  if(!v){ st.textContent = "키를 입력해 주세요"; return; }
-  document.getElementById("in-apikey").value = v;
-  config.apiKey = v;
-  store.set("busAlarmApiKey", v);
-  st.textContent = "저장됨 (…" + v.slice(-4) + ")";
+  // 활성 프로필에도 반영
+  if(profiles && profiles.list && profiles.list[profiles.active]){
+    profiles.list[profiles.active].data = JSON.parse(JSON.stringify(rest));
+    saveProfiles();
+  }
 }
 function configToHash(){
-  return "#" + btoa(unescape(encodeURIComponent(JSON.stringify(config))));
+  // 내장 키는 링크에 포함하지 않음
+  const c = {...config};
+  if(c.apiKey === DEFAULT_API_KEY) delete c.apiKey;
+  return "#" + btoa(unescape(encodeURIComponent(JSON.stringify(c))));
+}
+
+/* ---------- 프로필: 출발 장소별 설정 (집/회사 등) ---------- */
+let profiles = null;
+const escHtml = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+function snapshotConfig(){
+  const {apiKey, ...rest} = config;
+  return JSON.parse(JSON.stringify(rest));
+}
+function saveProfiles(){ store.set("busAlarmProfiles", JSON.stringify(profiles)); }
+function initProfiles(){
+  try{ profiles = JSON.parse(store.get("busAlarmProfiles")||"null"); }catch(e){ profiles = null; }
+  if(!profiles || !profiles.list || !profiles.list.length){
+    // 기존 단일 설정을 첫 프로필("집")로 이전
+    profiles = {active:0, list:[{name:"집", data:snapshotConfig()}]};
+    saveProfiles();
+  }else{
+    if(typeof profiles.active !== "number" || !profiles.list[profiles.active]) profiles.active = 0;
+    Object.assign(config, JSON.parse(JSON.stringify(profiles.list[profiles.active].data)));
+  }
+}
+function applyProfile(i){
+  profiles.active = i;
+  Object.assign(config, JSON.parse(JSON.stringify(profiles.list[i].data)));
+  saveProfiles();
+  persistConfig();
+  notified.clear();
+  cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
+  renderProfileChips(); fillForm(); updateSetupHint(); render();
+  document.getElementById("unmatched-hint").innerHTML = "";
+  doFetch();
+}
+function switchProfile(i){
+  if(i === profiles.active) return;
+  profiles.list[profiles.active].data = snapshotConfig(); // 현재 상태 저장 후 전환
+  applyProfile(i);
+}
+function addProfile(){
+  const name = prompt("새 프로필 이름 (예: 집, 회사, 본가)", "");
+  if(!name || !name.trim()) return;
+  profiles.list[profiles.active].data = snapshotConfig();
+  profiles.list.push({name: name.trim().slice(0,10), data: snapshotConfig()});
+  applyProfile(profiles.list.length - 1);
+  showView("settings"); // 새 프로필은 바로 설정 편집으로
+}
+function renameProfile(){
+  const cur = profiles.list[profiles.active];
+  const name = prompt("프로필 이름 변경", cur.name);
+  if(!name || !name.trim()) return;
+  cur.name = name.trim().slice(0,10);
+  saveProfiles(); renderProfileChips();
+}
+function deleteProfile(){
+  if(profiles.list.length <= 1){ alert("프로필이 하나뿐이라 삭제할 수 없어요."); return; }
+  if(!confirm('"' + profiles.list[profiles.active].name + '" 프로필을 삭제할까요?')) return;
+  profiles.list.splice(profiles.active, 1);
+  applyProfile(0);
+}
+function renderProfileChips(){
+  const html = profiles.list.map((p,i)=>
+    `<span class="chip ${i===profiles.active?"on":""}" onclick="switchProfile(${i})">${escHtml(p.name)}</span>`).join("")
+    + `<span class="chip" onclick="addProfile()">+ 추가</span>`;
+  const h = document.getElementById("profile-chips-home"); if(h) h.innerHTML = html;
+  const s = document.getElementById("profile-chips-set"); if(s) s.innerHTML = html;
 }
 
 /* ---------- CORS 우회 fetch: 직접 → codetabs → allorigins → corsproxy 순서로 시도 ---------- */
@@ -570,10 +632,8 @@ async function searchStop(){
   const q = document.getElementById("in-stopname").value.trim();
   const box = document.getElementById("stop-results");
   if(!q){ box.innerHTML = '<div class="err">정류장 이름 또는 정류소번호를 입력해 주세요.</div>'; return; }
-  const key = sanitizeKey(document.getElementById("in-apikey").value) || sanitizeKey(config.apiKey);
-  if(!key){ box.innerHTML = '<div class="err">먼저 API 키를 입력해 주세요.</div>'; return; }
+  const key = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
   config.apiKey = key;
-  store.set("busAlarmApiKey", key);
   box.innerHTML = '<div class="notice">검색 중…</div>';
   const isNumber = /^\d{4,9}$/.test(q.replace(/\s/g,""));
   try{
@@ -854,7 +914,6 @@ function checkAlarms(){
 }
 
 /* ---------- 자동 새로고침 루프 ---------- */
-let autoOn = false;
 let refreshTimer = null;
 let fetching = false;
 
@@ -878,7 +937,7 @@ async function doFetch(){
     render();
     renderUnmatched(unresolved);
     checkAlarms();
-    setStatus("업데이트: " + fmtClock(lastFetchAt), autoOn);
+    setStatus("업데이트: " + fmtClock(lastFetchAt), true);
   }catch(e){
     document.getElementById("err-box").innerHTML = '<div class="err">'+e.message+'</div>';
     setStatus("오류 발생", false);
@@ -886,34 +945,26 @@ async function doFetch(){
   fetching = false;
 }
 function manualRefresh(){ doFetch(); }
-function toggleAuto(){
-  autoOn = !autoOn;
-  const btn = document.getElementById("btn-auto");
-  if(autoOn){
-    btn.textContent = "자동 새로고침 중지";
-    doFetch();
-    keepAwake();
-  }else{
-    btn.textContent = "자동 새로고침 시작";
-    setStatus("대기 중", false);
-  }
-}
 function setStatus(t, live){
-  document.getElementById("status-text").textContent = t + (autoOn && !inWindow() ? " (알람 시간대 밖)" : "");
+  document.getElementById("status-text").textContent = t + (inWindow() ? "" : " · 알람 시간대 아님");
   document.getElementById("live-dot").className = "dot" + (live?" live":"");
 }
 async function keepAwake(){
   try{ if("wakeLock" in navigator) await navigator.wakeLock.request("screen"); }catch(e){}
 }
-// 1초 틱: 시계/카운트다운 갱신, 30초마다 재조회
+// 1초 틱: 시계/카운트다운 갱신. 앱이 화면에 보이는 동안 30초마다 자동 재조회
 let tick = 0;
 setInterval(()=>{
   document.getElementById("clock").textContent = fmtClock(new Date());
   if(lastFetchAt) render();
   tick++;
-  if(autoOn && tick % 30 === 0 && inWindow()) doFetch();
+  if(tick % 30 === 0 && !document.hidden) doFetch();
   if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
 },1000);
+// 앱으로 돌아오면 즉시 최신화
+document.addEventListener("visibilitychange", ()=>{
+  if(!document.hidden){ doFetch(); keepAwake(); }
+});
 
 /* ---------- 화면 전환 & 설정 폼 ---------- */
 function showView(v){
@@ -968,9 +1019,6 @@ function cityChanged(){
 
 function fillForm(){
   loadCityList();
-  const customKey = config.apiKey && config.apiKey !== DEFAULT_API_KEY;
-  document.getElementById("in-apikey").value = customKey ? config.apiKey : "";
-  document.getElementById("apikey-status").textContent = customKey ? "직접 설정한 키 사용 중 (…" + config.apiKey.slice(-4) + ")" : "앱 내장 키 사용 중";
   document.getElementById("in-voice").checked = config.voice !== false;
   document.getElementById("in-buses").value = config.buses.join(", ");
   document.getElementById("in-walk").value = config.walkMin;
@@ -995,7 +1043,7 @@ function toggleDay(i){
   renderDayChips();
 }
 function saveSettings(){
-  config.apiKey = sanitizeKey(document.getElementById("in-apikey").value) || DEFAULT_API_KEY;
+  config.apiKey = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
   config.buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
   config.walkMin = Math.max(0, parseInt(document.getElementById("in-walk").value||"0",10));
   config.prepMin = Math.max(0, parseInt(document.getElementById("in-prep").value||"0",10));
@@ -1026,7 +1074,7 @@ function copyConfigLink(){
     .catch(()=>prompt("아래 링크를 복사해서 즐겨찾기 하세요:", link));
 }
 function saveQuiet(){
-  config.apiKey = sanitizeKey(document.getElementById("in-apikey").value) || config.apiKey;
+  config.apiKey = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
   const buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
   if(buses.length) config.buses = buses;
   persistConfig();
@@ -1111,13 +1159,15 @@ if(FEEDBACK_URL) document.getElementById("btn-feedback").classList.remove("hidde
 
 /* ---------- 초기화 ---------- */
 loadConfig();
+initProfiles();
+renderProfileChips();
 fillForm();
 updateSetupHint();
 maybeShowInstall();
 updatePermBanner();
 if(config.apiKey && config.stopId && config.buses.length){
   doFetch();
-  if(inWindow()) toggleAuto();
+  keepAwake();
 }else{
   showView("settings");
 }
