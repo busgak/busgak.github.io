@@ -263,10 +263,10 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v42";
+const APP_VERSION = "v43";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
-const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
+/* API 키는 서버(프록시)에만 보관됨 - 앱은 프록시를 통해서만 데이터를 요청 */
 const DAY_NAMES = ["일","월","화","수","목","금","토"];
 
 /* ---------- 설정 저장 (안전한 저장소 래퍼: 사용 불가 환경에선 메모리+URL 해시) ---------- */
@@ -305,11 +305,7 @@ function loadConfig(){
     if(raw){ try{ config = Object.assign(config, JSON.parse(raw)); }catch(e){} }
   }
   // 3) API 키는 항상 별도 저장소에서 (해시에 키가 있으면 그걸 우선하고 별도 저장)
-  const savedKey = sanitizeKey(store.get("busAlarmApiKey"));
-  config.apiKey = sanitizeKey(config.apiKey);
-  if(config.apiKey){ store.set("busAlarmApiKey", config.apiKey); }
-  else if(savedKey){ config.apiKey = savedKey; }
-  if(!config.apiKey) config.apiKey = DEFAULT_API_KEY; // 키가 없으면 앱 내장 키 사용
+  config.apiKey = ""; // 키는 서버에만 있음 (클라이언트 미보관)
   if(fromHash) persistConfig();
 }
 function persistConfig(){
@@ -326,7 +322,7 @@ function persistConfig(){
 function configToHash(){
   // 내장 키는 링크에 포함하지 않음
   const c = {...config};
-  if(c.apiKey === DEFAULT_API_KEY) delete c.apiKey;
+  delete c.apiKey;
   return "#" + btoa(unescape(encodeURIComponent(JSON.stringify(c))));
 }
 
@@ -482,11 +478,10 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 async function tagoCall(service, op, params){
   let lastErr = null;
   for(let attempt=0; attempt<3; attempt++){
-    const host = attempt===2 ? TAGO_HOST.replace("https://","http://") : TAGO_HOST;
     try{
-      const q = "serviceKey=" + keyParam() + "&pageNo=1&numOfRows=200&_type=json&cityCode=" + ((provider()==="tago" && config.cityCode) || 23) +
+      const q = "op=" + encodeURIComponent(service + "/" + op) + "&cityCode=" + ((provider()==="tago" && config.cityCode) || 23) +
         Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
-      const text = await fetchText(host + "/" + service + "/" + op + "?" + q);
+      const text = await fetchText(PUSH_SERVER + "/p/tago?" + q);
       let data;
       try{ data = JSON.parse(text); }
       catch(e){ throw apiErr("응답 해석 실패: " + text.slice(0,160), {retryable:true}); }
@@ -537,9 +532,9 @@ async function seoulCall(op, params){
   let lastErr = null;
   for(let attempt=0; attempt<3; attempt++){
     try{
-      const q = "serviceKey=" + keyParam() + "&resultType=json" +
+      const q = "op=" + encodeURIComponent(op) +
         Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
-      const text = await fetchText("http://ws.bus.go.kr/api/rest/" + op + "?" + q);
+      const text = await fetchText(PUSH_SERVER + "/p/seoul?" + q);
       let data;
       try{ data = JSON.parse(text); }
       catch(e){ throw apiErr("서울 버스 API 응답 해석 실패: " + text.slice(0,120), {retryable:true}); }
@@ -567,9 +562,9 @@ async function ggCall(path, params){
   let lastErr = null;
   for(let attempt=0; attempt<3; attempt++){
     try{
-      const q = "serviceKey=" + keyParam() + "&format=json" +
+      const q = "op=" + encodeURIComponent(path) +
         Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
-      const text = await fetchText("https://apis.data.go.kr/6410000/" + path + "?" + q);
+      const text = await fetchText(PUSH_SERVER + "/p/gg?" + q);
       let data;
       try{ data = JSON.parse(text); }
       catch(e){ throw apiErr("경기 버스 API 응답 해석 실패: " + text.slice(0,120), {retryable:true}); }
@@ -661,8 +656,6 @@ async function searchStop(){
   const q = document.getElementById("in-stopname").value.trim();
   const box = document.getElementById("stop-results");
   if(!q){ box.innerHTML = '<div class="err">정류장 이름 또는 정류소번호를 입력해 주세요.</div>'; return; }
-  const key = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
-  config.apiKey = key;
   box.innerHTML = '<div class="notice">검색 중…</div>';
   const isNumber = /^\d{4,9}$/.test(q.replace(/\s/g,""));
   try{
@@ -1265,7 +1258,7 @@ function inWindow(){
 }
 let fetchingSince = 0;
 async function doFetch(){
-  if(fetching || !config.stopId || !config.apiKey) return;
+  if(fetching || !config.stopId) return;
   fetching = true;
   fetchingSince = Date.now();
   setStatus("확인 중…", true);
@@ -1429,7 +1422,6 @@ function toggleDay(i){
   renderDayChips();
 }
 function saveSettings(){
-  config.apiKey = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
   config.buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
   config.walkMin = Math.max(0, parseInt(document.getElementById("in-walk").value||"0",10));
   config.start = document.getElementById("in-start").value || "06:30";
@@ -1460,7 +1452,6 @@ function copyConfigLink(){
     .catch(()=>prompt("아래 링크를 복사해서 즐겨찾기 하세요:", link));
 }
 function saveQuiet(){
-  config.apiKey = sanitizeKey(config.apiKey) || DEFAULT_API_KEY;
   const buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
   if(buses.length) config.buses = buses;
   persistConfig();
@@ -1645,7 +1636,7 @@ updateSetupHint();
 maybeShowInstall();
 updatePermBanner();
 // 첫 화면은 항상 홈 (미설정이면 홈의 안내가 설정 탭으로 유도)
-if(config.apiKey && config.stopId && config.buses.length){
+if(config.stopId && config.buses.length){
   doFetch();
   keepAwake();
 }
