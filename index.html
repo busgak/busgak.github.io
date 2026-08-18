@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v23";
+const APP_VERSION = "v24";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -939,20 +939,44 @@ function logEvt(msg){
   alarmLog.push(fmtClock(new Date()).slice(0,5) + " " + msg);
   if(alarmLog.length > 6) alarmLog.shift();
 }
+const isAndroid = /android/i.test(navigator.userAgent);
+function speakOnce(text, useVoice, label){
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
+  // 안드로이드는 명시적 음성 지정이 조용한 실패를 일으키는 경우가 있어 lang에 맡긴다
+  if(useVoice && !isAndroid){
+    if(!koVoice) pickKoVoice();
+    if(koVoice) u.voice = koVoice;
+  }
+  let started = false;
+  u.onstart = () => { started = true; logEvt("음성 재생됨" + (label||"")); };
+  u.onerror = (e) => logEvt("음성 오류" + (label||"") + ": " + (e.error||"?"));
+  speechSynthesis.resume();
+  speechSynthesis.speak(u);
+  return () => started;
+}
 function speak(text){
   if(config.voice===false){ logEvt("음성 꺼짐 상태"); return; }
   try{
     if(!("speechSynthesis" in window)){ logEvt("음성 미지원 기기"); return; }
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0;
-    if(!koVoice) pickKoVoice();
-    if(koVoice) u.voice = koVoice;
-    u.onstart = () => logEvt("음성 재생됨");
-    u.onerror = (e) => logEvt("음성 오류: " + (e.error||"?"));
-    speechSynthesis.cancel();
-    speechSynthesis.resume(); // 안드로이드 크롬의 '멈춘 채 굳는' 버그 해제
-    logEvt("음성 시도: " + text.slice(0,14));
-    setTimeout(()=>{ try{ speechSynthesis.speak(u); }catch(e){ logEvt("음성 예외"); } }, 60);
+    // 진행 중인 발화가 있을 때만 취소 (안드로이드에서 빈 취소가 다음 발화를 죽이는 문제 회피)
+    if(speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+    speechSynthesis.resume();
+    logEvt("음성 시도: " + text.slice(0,12));
+    setTimeout(()=>{
+      try{
+        const startedFn = speakOnce(text, true, "");
+        // 1.5초 안에 시작 안 되면 엔진 리셋 후 1회 재시도
+        setTimeout(()=>{
+          if(startedFn()) return;
+          logEvt("음성 무반응, 재시도");
+          try{
+            speechSynthesis.cancel();
+            setTimeout(()=>{ try{ speakOnce(text, false, "(재시도)"); }catch(e){ logEvt("재시도 예외"); } }, 250);
+          }catch(e){}
+        }, 1500);
+      }catch(e){ logEvt("음성 예외"); }
+    }, 200);
   }catch(e){ logEvt("음성 예외2"); }
 }
 function testVoice(){
