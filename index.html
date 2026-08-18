@@ -1186,6 +1186,11 @@ if(config.apiKey && config.stopId && config.buses.length){
 <script>
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="127.0.0.1" || location.hostname==="localhost")){
   navigator.serviceWorker.register("sw.js").catch(function(){});
+  var swReloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", function(){
+    if(swReloaded) return; swReloaded = true;
+    location.reload(); // 새 버전 서비스워커가 활성화되면 즉시 새 버전으로 갱신
+  });
 }
 </script>
 </body>
