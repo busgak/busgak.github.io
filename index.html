@@ -258,6 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
+const APP_VERSION = "v19";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -853,9 +854,12 @@ function render(){
 
   // 원본 데이터
   const raw = document.getElementById("rawlist");
-  raw.innerHTML = lastArrivalsRaw.length
+  const diag = "버전 " + APP_VERSION
+    + " · 갱신 " + (lastFetchAt ? Math.round(elapsed) + "초 전" : "-")
+    + " · 화면유지 " + (("wakeLock" in navigator) ? (wakeLockObj ? "작동 중" : "꺼짐") : "미지원");
+  raw.innerHTML = diag + "<br>" + (lastArrivalsRaw.length
     ? lastArrivalsRaw.map(a=>`${a.routeNo||"?"}번 · ${Math.round((a.estSec-elapsed)/60)}분 후 도착 · ${a.restStops||"?"}정거장 전`).join("<br>")
-    : "데이터 없음";
+    : "데이터 없음");
 }
 
 /* ---------- 설정한 버스가 지금 접근 중이 아닐 때 안내 ---------- */
@@ -929,7 +933,17 @@ function notify(title, body, soundTimes, speech){
   beep(soundTimes||2);
   if(speech) speak(speech);
   if(("Notification" in window) && Notification.permission==="granted"){
-    try{ new Notification(title,{body, tag:title+body}); }catch(e){}
+    // 모바일에서는 new Notification()이 막혀 있어 서비스워커 경유로 표시
+    try{
+      if("serviceWorker" in navigator){
+        navigator.serviceWorker.getRegistration().then(reg => {
+          if(reg && reg.showNotification) reg.showNotification(title, {body, tag:"busgak-live", icon:"icon-192.png", vibrate:[200,100,200]});
+          else new Notification(title, {body});
+        }).catch(()=>{ try{ new Notification(title,{body}); }catch(e){} });
+      }else{
+        new Notification(title, {body});
+      }
+    }catch(e){}
   }
 }
 // 앱을 연 직후 첫 확인에서는 이미 조건에 든 버스를 조용히 등록만 하고,
@@ -977,9 +991,11 @@ function inWindow(){
   const [eh,em]=config.end.split(":").map(Number);
   return cur >= sh*60+sm && cur <= eh*60+em;
 }
+let fetchingSince = 0;
 async function doFetch(){
   if(fetching || !config.stopId || !config.apiKey) return;
   fetching = true;
+  fetchingSince = Date.now();
   setStatus("확인 중…", true);
   document.getElementById("err-box").innerHTML="";
   try{
@@ -1016,25 +1032,31 @@ async function updateWakeLock(){
   }catch(e){}
 }
 function keepAwake(){ updateWakeLock(); }
-// 1초 틱: 시계/카운트다운 갱신. 앱이 화면에 보이는 동안 30초마다 자동 재조회
+// 1초 틱: 시계/카운트다운 갱신. 앱이 화면에 보이는 동안 10~30초마다 자동 재조회
 let tick = 0;
 setInterval(()=>{
-  document.getElementById("clock").textContent = fmtClock(new Date());
-  if(lastFetchAt) render();
-  tick++;
-  // 출발 5분 전 버스가 있으면 10초, 평소엔 30초마다 갱신 (API 한도 절약)
-  const urgent = lastFetchAt && cachedOpts.some(o => {
-    const dep = o.departSec - (Date.now() - lastFetchAt.getTime())/1000;
-    return dep > -60 && dep <= 5*60;
-  });
-  if(tick % (urgent ? 10 : 30) === 0 && !document.hidden) doFetch();
-  if(tick % 15 === 0) updateWakeLock(); // 알람 시간대 진입/이탈에 맞춰 화면 유지 갱신
-  if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
+  try{
+    document.getElementById("clock").textContent = fmtClock(new Date());
+    if(lastFetchAt) render();
+    tick++;
+    // 조회가 60초 넘게 안 끝나면 잠금 해제 (절전 등으로 멈춘 요청 복구)
+    if(fetching && fetchingSince && Date.now() - fetchingSince > 60000) fetching = false;
+    // 출발 5분 전 버스가 있으면 10초, 평소엔 30초마다 갱신 (API 한도 절약)
+    const urgent = lastFetchAt && cachedOpts.some(o => {
+      const dep = o.departSec - (Date.now() - lastFetchAt.getTime())/1000;
+      return dep > -60 && dep <= 5*60;
+    });
+    if(tick % (urgent ? 10 : 30) === 0 && !document.hidden) doFetch();
+    if(tick % 15 === 0) updateWakeLock();
+    if(tick % 3600 === 0) notified.clear(); // 1시간마다 알림 기록 초기화
+  }catch(e){ /* 틱 하나의 오류가 루프를 죽이지 않게 */ }
 },1000);
-// 앱으로 돌아오면 즉시 최신화
-document.addEventListener("visibilitychange", ()=>{
-  if(!document.hidden){ doFetch(); keepAwake(); }
-});
+// 앱으로 돌아오면 즉시 최신화 + 화면 유지 재요청 (잠금 해제·복귀·터치 모두)
+function onReturn(){ if(!document.hidden){ doFetch(); updateWakeLock(); } }
+document.addEventListener("visibilitychange", onReturn);
+window.addEventListener("pageshow", onReturn);
+window.addEventListener("focus", onReturn);
+document.addEventListener("pointerdown", ()=>updateWakeLock());
 
 /* ---------- 화면 전환 & 설정 폼 ---------- */
 function showView(v){
