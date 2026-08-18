@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v24";
+const APP_VERSION = "v25";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -939,12 +939,12 @@ function logEvt(msg){
   alarmLog.push(fmtClock(new Date()).slice(0,5) + " " + msg);
   if(alarmLog.length > 6) alarmLog.shift();
 }
-const isAndroid = /android/i.test(navigator.userAgent);
+const isMobileDevice = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 function speakOnce(text, useVoice, label){
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
-  // 안드로이드는 명시적 음성 지정이 조용한 실패를 일으키는 경우가 있어 lang에 맡긴다
-  if(useVoice && !isAndroid){
+  // 모바일(안드로이드·아이폰)은 명시적 음성 지정이 조용한 실패를 일으켜 lang에 맡긴다
+  if(useVoice && !isMobileDevice){
     if(!koVoice) pickKoVoice();
     if(koVoice) u.voice = koVoice;
   }
