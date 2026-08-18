@@ -261,7 +261,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -1115,19 +1115,26 @@ function checkAlarms(){
    옛 값으로 되돌아가 보인다. 같은 버스의 새 예측이 이전 앵커보다 "살짝 뒤(90초 미만)"면
    낡은 데이터로 보고 이전 앵커를 유지해 카운트다운을 계속 이어간다.
    (더 빨라진 경우와 90초 이상의 진짜 지연은 즉시 반영) */
-const apiFreshness = new Map(); // nb → {abs(원본 예측), since(마지막 변화 시각)} : 차량 대기 감지용
+/* 카운트다운 안정화 (v36):
+   TAGO 인천 데이터는 60~90초에 한 번만 갱신되고, 갱신 시 흐른 시간을 정확히 따라잡는다.
+   → 원본 예측값(rawEst)이 지난번과 같으면 "미갱신"으로 보고 로컬 카운트다운을 그대로 유지,
+     원본 값이 바뀐 순간에만 새 값을 전면 수용한다. */
+const apiFreshness = new Map(); // nb → {raw, since} : 장시간 미갱신 감지용
 function stabilizeOpts(newOpts){
   const nowMs = Date.now();
-  // 원본 예측이 변하는지 추적 (15초 이상 차이 나야 "변화"로 침)
   for(const o of newOpts){
+    o.rawEst = o.rawEst !== undefined ? o.rawEst : o.estSec; // 원본 예측 보존
     const nb = normBusNo(o.busNo);
-    const abs = nowMs + o.estSec*1000;
     const f = apiFreshness.get(nb);
-    if(!f || Math.abs(abs - f.abs) > 15000) apiFreshness.set(nb, {abs, since: nowMs});
-    else f.abs = abs;
+    if(!f || Math.abs(o.rawEst - f.raw) > 3) apiFreshness.set(nb, {raw: o.rawEst, since: nowMs});
   }
   if(!lastFetchAt || !cachedOpts.length) return;
-  const prevList = cachedOpts.map(o => ({nb: normBusNo(o.busNo), abs: lastFetchAt.getTime() + o.estSec*1000, used:false}));
+  const prevList = cachedOpts.map(o => ({
+    nb: normBusNo(o.busNo),
+    abs: lastFetchAt.getTime() + o.estSec*1000,
+    rawEst: o.rawEst !== undefined ? o.rawEst : o.estSec,
+    used: false
+  }));
   for(const o of newOpts){
     const nb = normBusNo(o.busNo);
     const abs = nowMs + o.estSec*1000;
@@ -1139,19 +1146,19 @@ function stabilizeOpts(newOpts){
     }
     if(best && bestD < 180000){
       best.used = true;
-      const gap = abs - best.abs;
-      let newAbs;
-      if(gap <= 0) newAbs = abs;                                 // 더 빨라짐: 즉시 반영
-      else if(gap < 20000) newAbs = best.abs;                    // 소폭 밀림: 카운트다운 유지
-      else newAbs = best.abs + Math.min(gap*0.3, 30000);         // 지연: 튕김 없이 서서히 따라감
-      o.estSec = Math.max(0, (newAbs - nowMs)/1000);
-      o.departSec = o.estSec - config.walkMin*60;
+      if(Math.abs(o.rawEst - best.rawEst) < 3){
+        // 원본값 그대로 = 데이터 미갱신 → 로컬 카운트다운 유지
+        o.estSec = Math.max(0, (best.abs - nowMs)/1000);
+        o.departSec = o.estSec - config.walkMin*60;
+        o.rawEst = best.rawEst;
+      }
+      // 원본값이 바뀐 경우: 새 값 전면 수용 (이미 o에 들어있음)
     }
   }
 }
 function isBusWaiting(busNo){
   const f = apiFreshness.get(normBusNo(busNo));
-  return f && (Date.now() - f.since) > 90000; // 예측이 90초 넘게 정지 = 차량 정차/대기 추정
+  return f && (Date.now() - f.since) > 180000; // 3분 넘게 원본 예측 정지 = 차량 정차/대기 추정
 }
 
 /* ---------- 자동 새로고침 루프 ---------- */
