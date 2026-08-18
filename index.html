@@ -145,8 +145,8 @@ if(location.hostname === "busgak.github.io"){
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
   <div class="muted" style="margin-top:10px">
-    앱을 화면에 띄워두면 <b>꺼지지 않고</b> 실시간으로 확인하며 소리·음성으로 알려드려요.
-    앱을 닫아도 설정에서 <b>"앱이 꺼져 있어도 알림 받기"</b>를 켜두면 알람 시간대에 푸시로 알려드려요.
+    앱을 화면에 띄워두면 <b>언제든</b> 화면이 꺼지지 않고, 출발 3분 전과 출발 시점에 소리·음성으로 알려드려요.
+    앱을 닫아도 설정에서 <b>"앱이 꺼져 있어도 알림 받기"</b>를 켜두면 설정한 시간대·요일에 푸시로 알려드려요.
   </div>
   <details>
     <summary>원본 도착 데이터 보기 (문제 해결용)</summary>
@@ -198,7 +198,7 @@ if(location.hostname === "busgak.github.io"){
       <b>출발시각</b> = 버스 도착예정 − 정류장까지 걷는 시간. 출발 3분 전과 출발 시점에 알림이 와요.<br>
       알람은 앱이 열려 있는 동안, 아래 시간대·요일 안에서만 울려요.
     </div>
-    <label style="margin-top:12px">알람 작동 시간대 (이 시간에만 자동 확인·알림)</label>
+    <label style="margin-top:12px">자동 푸시 시간대 (앱이 꺼져 있을 때 이 시간·요일에만 알림을 보내요. 앱이 켜져 있으면 언제든 알려드려요)</label>
     <div class="row">
       <input type="time" id="in-start" value="06:30">
       <input type="time" id="in-end" value="09:00">
@@ -258,7 +258,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v25";
+const APP_VERSION = "v26";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -943,10 +943,18 @@ const isMobileDevice = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 function speakOnce(text, useVoice, label){
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
-  // 모바일(안드로이드·아이폰)은 명시적 음성 지정이 조용한 실패를 일으켜 lang에 맡긴다
-  if(useVoice && !isMobileDevice){
-    if(!koVoice) pickKoVoice();
-    if(koVoice) u.voice = koVoice;
+  // 모바일은 기본적으로 lang에 맡기되, 고품질(향상/프리미엄) 한국어 음성이 설치돼 있으면 그걸 사용
+  if(useVoice){
+    if(isMobileDevice){
+      try{
+        const vs = speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith("ko"));
+        const best = vs.find(v => /향상|enhanced|premium|프리미엄|siri/i.test(v.name));
+        if(best) u.voice = best; // 없으면 지정하지 않음 (기본 음성)
+      }catch(e){}
+    }else{
+      if(!koVoice) pickKoVoice();
+      if(koVoice) u.voice = koVoice;
+    }
   }
   let started = false;
   u.onstart = () => { started = true; logEvt("음성 재생됨" + (label||"")); };
@@ -1010,7 +1018,7 @@ function checkAlarms(){
   if(!lastFetchAt) return;
   const now = new Date();
   const nowMs = now.getTime();
-  const inWin = inWindow();
+  // 앱이 켜져 있는 동안에는 시간대와 무관하게 항상 알림 (시간대·요일은 앱이 꺼졌을 때의 푸시에만 적용)
   const elapsed = (now-lastFetchAt)/1000;
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
@@ -1020,7 +1028,6 @@ function checkAlarms(){
       const k = normBusNo(o.busNo) + "|" + stage;
       if(nowMs - (lastAlarmAt.get(k)||0) < 4*60*1000) return; // 4분 내 중복 방지 (도착예측 흔들림 대응)
       if(!alarmsArmed){ lastAlarmAt.set(k, nowMs); logEvt("앱 켠 직후라 건너뜀: "+o.busNo); return; }
-      if(!inWin){ logEvt("시간대 밖: "+o.busNo); return; }
       lastAlarmAt.set(k, nowMs);
       logEvt("알람 발생: "+o.busNo+" "+stage);
       fn();
@@ -1071,7 +1078,7 @@ async function doFetch(){
 }
 function manualRefresh(){ doFetch(); }
 function setStatus(t, live){
-  document.getElementById("status-text").textContent = t + (inWindow() ? "" : " · 알람 시간대 아님");
+  document.getElementById("status-text").textContent = t;
   document.getElementById("live-dot").className = "dot" + (live?" live":"");
 }
 /* 화면 유지: 앱이 화면에 떠 있는 동안 (내리면 자동 해제되어 배터리 부담 없음) */
