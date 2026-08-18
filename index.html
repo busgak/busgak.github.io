@@ -336,6 +336,7 @@ function applyProfile(i){
   saveProfiles();
   persistConfig();
   notified.clear();
+  alarmsArmed = false; // 전환 직후 첫 확인은 조용히
   cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
   renderProfileChips(); fillForm(); updateSetupHint(); render();
   document.getElementById("unmatched-hint").innerHTML = "";
@@ -918,10 +919,13 @@ function notify(title, body, soundTimes, speech){
     try{ new Notification(title,{body, tag:title+body}); }catch(e){}
   }
 }
+// 앱을 연 직후 첫 확인에서는 이미 조건에 든 버스를 조용히 등록만 하고,
+// 그 이후 새로 조건에 진입하는 버스만 알린다 (열자마자 알람이 울리는 것 방지)
+let alarmsArmed = false;
 function checkAlarms(){
-  if(!inWindow()) return;
   const now = new Date();
   if(!lastFetchAt) return;
+  const inWin = inWindow();
   const elapsed = (now-lastFetchAt)/1000;
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
@@ -930,15 +934,16 @@ function checkAlarms(){
     const depMin = Math.round(dep/60);
     if(dep > 0 && dep <= 3*60 && !notified.has(key+"soon")){
       notified.add(key+"soon");
-      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
+      if(alarmsArmed && inWin) notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+fmtMin(dep)+")", 3,
         o.busNo+"번 버스, "+(depMin<=1?"1분":depMin+"분")+" 뒤에 출발하세요.");
     }
     if(dep <= 30 && dep > -60 && !notified.has(key+"now")){
       notified.add(key+"now");
-      notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
+      if(alarmsArmed && inWin) notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
         o.busNo+"번 버스, 지금 출발하세요!");
     }
   }
+  alarmsArmed = true;
 }
 
 /* ---------- 자동 새로고침 루프 ---------- */
