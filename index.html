@@ -7,6 +7,11 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>나갈시간</title>
+<meta property="og:title" content="나갈시간">
+<meta property="og:description" content="지금 나가면 탈 수 있는 버스를 알려주는 출근 알람">
+<meta property="og:image" content="https://nagalsigan.github.io/icon-512.png">
+<meta property="og:url" content="https://nagalsigan.github.io/">
+<meta property="og:type" content="website">
 <style>
   :root{
     /* 모노크롬 그래파이트 팔레트. 색은 출발 임박도(good/warn/bad)에만 사용 */
@@ -193,6 +198,7 @@
 
   <button class="btn" onclick="saveSettings()">설정 저장</button>
   <button class="btn secondary" onclick="copyConfigLink()">설정 링크 복사 (즐겨찾기용)</button>
+  <button class="btn secondary hidden" id="btn-feedback" onclick="window.open(FEEDBACK_URL,'_blank')">의견 보내기 (개선 요청)</button>
   <div class="muted" style="margin-top:10px">
     저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정이 담긴 링크」를
     즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요. (링크에 API 키가 포함되니 다른 사람과 공유하지 마세요!)
@@ -1025,6 +1031,22 @@ window.addEventListener("beforeinstallprompt", function(e){
 function maybeShowInstall(){
   if(isStandalone() || installDismissedRecently()) return;
   const b = document.getElementById("install-banner");
+  const ua = navigator.userAgent;
+  // 카카오톡 인앱 브라우저: 설치 불가 → 외부 브라우저로 안내
+  if(/KAKAOTALK/i.test(ua)){
+    const isAndroid = /android/i.test(ua);
+    const btn = document.getElementById("install-btn");
+    if(isAndroid){
+      document.getElementById("install-msg").innerHTML = "카카오톡 안에서는 앱 설치가 안 돼요. Chrome으로 열어주세요";
+      btn.textContent = "Chrome으로 열기";
+      btn.onclick = function(){ location.href = "intent://nagalsigan.github.io/#Intent;scheme=https;package=com.android.chrome;end"; };
+    }else{
+      document.getElementById("install-msg").innerHTML = "카카오톡 안에서는 앱 설치가 안 돼요. 오른쪽 아래 <b>메뉴</b>에서 <b>다른 브라우저로 열기</b>를 눌러주세요";
+      btn.classList.add("hidden");
+    }
+    b.classList.remove("hidden");
+    return;
+  }
   if(deferredInstall){
     b.classList.remove("hidden");
     return;
@@ -1050,6 +1072,10 @@ function dismissInstall(){
   store.set("busAlarmInstallDismiss", String(Date.now()));
   document.getElementById("install-banner").classList.add("hidden");
 }
+
+/* ---------- 의견 보내기 (URL을 채우면 설정 탭에 버튼이 나타남) ---------- */
+const FEEDBACK_URL = "";
+if(FEEDBACK_URL) document.getElementById("btn-feedback").classList.remove("hidden");
 
 /* ---------- 초기화 ---------- */
 loadConfig();
