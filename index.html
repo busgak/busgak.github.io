@@ -263,7 +263,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v40";
+const APP_VERSION = "v41";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -355,21 +355,31 @@ function initProfiles(){
     persistConfig();
   }
 }
+const profileCache = new Map(); // 프로필별 마지막 도착 데이터 (전환 즉시 표시용)
 function applyProfile(i){
   profiles.active = i;
   Object.assign(config, JSON.parse(JSON.stringify(profiles.list[i].data)));
   saveProfiles();
   persistConfig();
   notified.clear(); lastAlarmAt.clear(); seenSoon.clear(); lastMinByBus.clear();
-  cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
-  quietPushSync(); // 푸시 설정도 새 프로필 기준으로 갱신
-  renderProfileChips(); fillForm(); updateSetupHint(); render();
+  // 이 프로필의 최근 데이터가 있으면 즉시 복원해 화면부터 그림 (10분 이내만)
+  const cached = profileCache.get(i);
+  if(cached && Date.now() - cached.at.getTime() < 10*60*1000){
+    cachedOpts = cached.opts; lastArrivalsRaw = cached.raw; lastFetchAt = cached.at;
+  }else{
+    cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
+  }
+  quietPushSync(); // 푸시 설정도 새 프로필 기준으로 갱신 (지연 실행)
+  renderProfileChips(); updateSetupHint(); render();
+  // 설정 화면이 열려 있을 때만 폼(노선 목록 포함) 갱신
+  if(!document.getElementById("view-settings").classList.contains("hidden")) fillForm();
   document.getElementById("unmatched-hint").innerHTML = "";
-  doFetch();
+  doFetch(); // 최신 데이터는 뒤에서 갱신
 }
 function switchProfile(i){
   if(i === profiles.active) return;
   profiles.list[profiles.active].data = snapshotConfig(); // 현재 상태 저장 후 전환
+  if(lastFetchAt) profileCache.set(profiles.active, {opts: cachedOpts, raw: lastArrivalsRaw, at: lastFetchAt});
   applyProfile(i);
 }
 function addProfile(){
@@ -1599,10 +1609,15 @@ async function syncPush(){
     st.textContent = "설정 실패: " + e.message;
   }
 }
-/* 설정·프로필이 바뀌면 서버에도 조용히 반영 */
-async function quietPushSync(){
+/* 설정·프로필이 바뀌면 서버에도 조용히 반영 (2.5초 묶음 처리로 연속 전환 시 한 번만) */
+let pushSyncTimer = null;
+function quietPushSync(){
   if(!pushSupported()) return;
-  try{ await syncPushToServer(); }catch(e){}
+  if(pushSyncTimer) clearTimeout(pushSyncTimer);
+  pushSyncTimer = setTimeout(async ()=>{
+    pushSyncTimer = null;
+    try{ await syncPushToServer(); }catch(e){}
+  }, 2500);
 }
 
 /* ---------- 의견 보내기 (URL을 채우면 설정 탭에 버튼이 나타남) ---------- */
