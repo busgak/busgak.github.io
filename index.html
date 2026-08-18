@@ -261,7 +261,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v37";
+const APP_VERSION = "v38";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 const DEFAULT_API_KEY = "CY6xswx0du%2BG%2FSs1ci01i2CcRh7txo%2BsEIltuVhIRjprrrD7mePPFKWmv%2FA0CjEl4y7qgscUTB7Su%2FJbtIy03Q%3D%3D";
@@ -910,7 +910,7 @@ function probeSpeech(){
     };
     u.onend = () => utterKeep.delete(u);
     u.onerror = () => utterKeep.delete(u);
-    speechSynthesis.resume();
+    if(!isIOS) speechSynthesis.resume();
     speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -1005,7 +1005,7 @@ function speakOnce(text, useVoice, label){
   u.onstart = () => { started = true; logEvt("음성 재생됨" + (label||"")); };
   u.onend = release;
   u.onerror = (e) => { logEvt("음성 오류" + (label||"") + ": " + (e.error||"?")); release(); };
-  speechSynthesis.resume();
+  if(!isIOS) speechSynthesis.resume();
   speechSynthesis.speak(u);
   return () => started;
 }
@@ -1021,9 +1021,9 @@ function speak(text){
       if(hint) hint.classList.remove("hidden");
       return;
     }
-    // 아이폰은 cancel이 엔진을 굳게 만들어 사용하지 않음 (짧은 문장이라 자연 대기열로 충분)
+    // 아이폰은 cancel/resume이 엔진을 굳게 만들어 사용하지 않음 (짧은 문장이라 자연 대기열로 충분)
     if(!isIOS && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
-    speechSynthesis.resume();
+    if(!isIOS) speechSynthesis.resume();
     logEvt("음성 시도: " + text.slice(0,12));
     setTimeout(()=>{
       try{
@@ -1033,8 +1033,7 @@ function speak(text){
           if(startedFn()) return;
           logEvt("음성 무반응, 재시도");
           try{
-            if(!isIOS) speechSynthesis.cancel();
-            speechSynthesis.resume();
+            if(!isIOS){ speechSynthesis.cancel(); speechSynthesis.resume(); }
             setTimeout(()=>{ try{ speakOnce(text, false, "(재시도)"); }catch(e){ logEvt("재시도 예외"); } }, 250);
           }catch(e){}
         }, 1500);
@@ -1243,7 +1242,7 @@ setInterval(()=>{
     if(tick % 15 === 0) updateWakeLock();
     if(tick % 10 === 0 && "speechSynthesis" in window){
       try{
-        speechSynthesis.resume(); // 음성엔진 멈춤 방지
+        if(!isIOS) speechSynthesis.resume(); // 안드로이드 음성엔진 멈춤 방지 (아이폰은 역효과라 금지)
         // 20초 넘게 speaking 상태로 굳어 있으면 강제 초기화
         if(speechSynthesis.speaking){
           if(!window.__spkSince) window.__spkSince = Date.now();
