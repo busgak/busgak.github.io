@@ -321,7 +321,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v49";
+const APP_VERSION = "v50";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1358,7 +1358,6 @@ const lastAlarmAt = new Map();  // "버스번호|단계" -> epoch ms (사라짐 
 const seenSoon = new Map();     // "곧 출발" 구간에 들어왔던 버스 (사라짐 감지용)
 const lastMinByBus = new Map(); // 버스번호 -> 마지막으로 안내한 남은 분 (카운트다운)
 const lastEstAbs = new Map();   // 버스번호 -> 마지막 예측 도착 절대시각 ms (오차 학습용)
-const depAbsMap = new Map();    // 버스번호 -> 마지막 예측 출발 절대시각 ms (급변 감지용)
 
 /* ---------- 온디바이스 예측 오차 학습 ----------
    버스가 도착 목록에서 사라진 시점(실제 통과)과 마지막 예측 도착시각의 차이를
@@ -1401,21 +1400,6 @@ function checkAlarms(){
     const gap = nxt ? nxt.departSec - o.departSec : null;
     const gapLead = (gap == null || gap >= 900) ? 30 : gap >= 600 ? 15 : 0;
     const dep = o.departSec - elapsed - ALARM_LEAD - gapLead - routeLead(nb);
-    // 예측 급변 경보: 출발 예정이 40초 넘게 갑자기 당겨지면 즉시 알림 (10분 내 버스만)
-    const depAbsNow = lastFetchAt.getTime() + o.departSec*1000;
-    const prevAbs = depAbsMap.get(nb);
-    depAbsMap.set(nb, depAbsNow);
-    if(prevAbs && prevAbs - depAbsNow > 40*1000 && dep <= 600 && dep > -60){
-      const sk = nb + "|shift";
-      if(nowMs - (lastAlarmAt.get(sk)||0) >= 3*60*1000){
-        lastAlarmAt.set(sk, nowMs);
-        const mm = Math.max(0, Math.round(dep/60));
-        logEvt("예측 급변: "+o.busNo+" "+Math.round((prevAbs-depAbsNow)/1000)+"초 당겨짐");
-        notify("예측 당겨짐 · "+o.busNo+"번",
-          mm<=0 ? "버스가 빨라졌어요. 지금 나가세요!" : "버스가 빨라졌어요. "+mm+"분 안에 나가세요!", 4,
-          busNoSpeech(o.busNo)+"번 버스가 빨라졌어요. "+(mm<=0 ? "지금 나가세요!" : mm+"분 안에 나가세요."));
-      }
-    }
     if(dep > 330 || dep <= -60) continue;
     seenSoon.set(nb, nowMs);
     const m = Math.max(0, Math.round(dep/60));
@@ -1423,15 +1407,18 @@ function checkAlarms(){
     const prev = has ? lastMinByBus.get(nb) : null;
     if(has && m >= prev + 2){ lastMinByBus.set(nb, m); logEvt("예측 밀림, 기준 재설정: "+o.busNo); continue; }
     if(has && m >= prev) continue; // 같은 분(또는 1분 밀림)은 다시 안내하지 않음
+    // 급변(2분 이상 당겨짐)은 별도 알람 대신 이번 카운트다운 안내에 맥락만 얹는다 (알람 횟수 동일)
+    const jumped = has && m <= prev - 2;
     lastMinByBus.set(nb, m);
     const depTime = fmtHM(new Date(nowMs + dep*1000));
-    logEvt("알람: "+o.busNo+" "+m+"분");
+    logEvt("알람: "+o.busNo+" "+m+"분"+(jumped?" (급변)":""));
     if(m >= 1){
-      notify("곧 나가기 · "+o.busNo+"번", depTime+"에 나가세요 ("+m+"분 뒤)", 3,
-        busNoSpeech(o.busNo)+"번 버스, "+m+"분 뒤에 나가세요.");
+      notify((jumped?"버스 빨라짐":"곧 나가기")+" · "+o.busNo+"번",
+        (jumped?"예측이 당겨졌어요. ":"")+depTime+"에 나가세요 ("+m+"분 뒤)", 3,
+        busNoSpeech(o.busNo)+"번 버스"+(jumped?"가 빨라졌어요. ":", ")+m+"분 뒤에 나가세요.");
     }else{
-      notify("지금 나가세요 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
-        busNoSpeech(o.busNo)+"번 버스, 지금 나가세요!");
+      notify("지금 나가세요 · "+o.busNo+"번", (jumped?"버스가 빨라졌어요. ":"")+"지금 나가야 탈 수 있어요!", 4,
+        busNoSpeech(o.busNo)+"번 버스"+(jumped?"가 빨라졌어요. ":", ")+"지금 나가세요!");
     }
   }
   // "곧 출발" 구간에 있던 버스가 예고 없이 사라지면(예측 급변 등) 출발 안내를 대신 보냄
@@ -1444,7 +1431,6 @@ function checkAlarms(){
     // 온디바이스 학습: 예측 도착시각 대비 실제 통과(사라짐) 시점의 오차 기록
     const est = lastEstAbs.get(bus);
     if(est){ learnPredErr(bus, (est - nowMs)/1000); lastEstAbs.delete(bus); }
-    depAbsMap.delete(bus);
     const k = bus + "|now";
     if(nowMs - (lastAlarmAt.get(k)||0) >= 4*60*1000){
       lastAlarmAt.set(k, nowMs);
