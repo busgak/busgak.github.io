@@ -148,6 +148,31 @@ if(location.hostname === "busgak.github.io"){
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
   }
+  /* 어르신 모드: 전체 글씨 확대 + 진단 요소 숨김 */
+  body.elder{font-size:17px;}
+  body.elder h1{font-size:23px;}
+  body.elder .subtitle{font-size:14px;}
+  body.elder .depart-main{font-size:36px;}
+  body.elder .depart-card:not(.best) .depart-main{font-size:27px;}
+  body.elder .busno{font-size:17px; padding:5px 14px;}
+  body.elder .depart-sub{font-size:15px;}
+  body.elder .dc-clock{font-size:15px;}
+  body.elder .btn{font-size:17px; padding:15px 16px;}
+  body.elder .btn.small{font-size:15px; padding:10px 14px;}
+  body.elder .chip{font-size:15px; padding:7px 14px;}
+  body.elder .tabbar button{font-size:16.5px; padding:13px 0;}
+  body.elder label{font-size:14px;}
+  body.elder input[type=text],body.elder input[type=number],body.elder input[type=time]{font-size:17px;}
+  body.elder .muted{font-size:13.5px;}
+  body.elder .notice,body.elder .err{font-size:15px;}
+  body.elder .stop-item{font-size:16px; padding:14px 13px;}
+  body.elder .statuszone{font-size:14px;}
+  body.elder #view-home details{display:none;}
+  /* 어르신 모드 단순화: 부가정보·긴 설명 숨기고 핵심만 (버스번호·나갈 시간·정거장 수·막차) */
+  body.elder .dc-extra{display:none;}
+  body.elder .home-help{display:none;}
+  body.elder .subtitle{display:none;}
+  body.elder .depart-sub{font-size:16px;}
 </style>
 </head>
 <body>
@@ -189,7 +214,7 @@ if(location.hostname === "busgak.github.io"){
   <div id="cards"></div>
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
-  <div class="muted" style="margin-top:10px">
+  <div class="muted home-help" style="margin-top:10px">
     앱을 화면에 띄워두면 <b>언제든</b> 화면이 꺼지지 않고, 출발 5분 전부터 매분 소리·음성으로 알려드려요.
     앱을 닫아도 설정에서 <b>"앱이 꺼져 있어도 알림 받기"</b>를 켜두면 설정한 시간대·요일에 푸시로 알려드려요.
   </div>
@@ -269,6 +294,15 @@ if(location.hostname === "busgak.github.io"){
     </div>
   </div>
 
+  <div class="card">
+    <h2>화면</h2>
+    <label style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
+      <input type="checkbox" id="in-elder" onchange="toggleElderMode(this.checked)" style="width:18px; height:18px; accent-color:var(--btn-bg);">
+      어르신 모드 — 글씨를 키우고 음성 안내를 켜요
+    </label>
+    <div class="muted" style="margin-top:6px">부모님 폰에 설정해 드릴 때 켜두면 좋아요. (모든 프로필 공통)</div>
+  </div>
+
   <button class="btn" onclick="saveSettings()">설정 저장</button>
   <button class="btn secondary" onclick="copyConfigLink()">설정 링크 복사 (즐겨찾기용)</button>
   <button class="btn secondary hidden" id="btn-feedback" onclick="window.open(FEEDBACK_URL,'_blank')">의견 보내기 (개선 요청)</button>
@@ -321,7 +355,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v50";
+const APP_VERSION = "v51";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1054,11 +1088,11 @@ function render(){
       </div>
       <div class="depart-main">${label}</div>
       <div class="depart-sub">
-        <span>${fmtHM(arrTime)} 정류장 도착 예정</span>
+        <span class="dc-extra">${fmtHM(arrTime)} 정류장 도착 예정</span>
         ${o.restStops?`<span>${o.restStops}정거장 전</span>`:""}
         ${isBusWaiting(o.busNo)?`<span style="color:var(--warn)">차량 대기 중 · 시간 변동 가능</span>`:""}
-        ${o.lastStopName?`<span>(${o.lastStopName} 통과)</span>`:""}
-        ${o.low==="1"?`<span>저상</span>`:""}
+        ${o.lastStopName?`<span class="dc-extra">(${o.lastStopName} 통과)</span>`:""}
+        ${o.low==="1"?`<span class="dc-extra">저상</span>`:""}
         ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
       </div>
     </div>`;
@@ -1298,6 +1332,23 @@ function toggleVoice(){
 function updateVoiceIcon(){
   const b = document.getElementById("voice-toggle");
   if(b) b.classList.toggle("off", !voiceOn);
+}
+/* 어르신 모드: 큰 글씨 + 단순 화면 + 음성 자동 켬 (전역 설정) */
+let elderMode = false;
+function initElderMode(){
+  elderMode = store.get("busgakElderMode") === "1";
+  applyElderMode();
+}
+function applyElderMode(){
+  document.body.classList.toggle("elder", elderMode);
+  const box = document.getElementById("in-elder");
+  if(box) box.checked = elderMode;
+}
+function toggleElderMode(on){
+  elderMode = on === true;
+  store.set("busgakElderMode", elderMode ? "1" : "0");
+  applyElderMode();
+  if(elderMode && !voiceOn) toggleVoice(); // 켜면 음성 안내도 함께
 }
 function speak(text){
   if(!voiceOn){ logEvt("음성 꺼짐 상태"); return; }
@@ -1952,6 +2003,7 @@ if(FEEDBACK_URL) document.getElementById("btn-feedback").classList.remove("hidde
 loadConfig();
 initProfiles();
 initVoicePref();
+initElderMode();
 renderProfileChips();
 fillForm();
 updateSetupHint();
