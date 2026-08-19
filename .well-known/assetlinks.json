@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "io.github.busgak.twa",
+    "sha256_cert_fingerprints": [
+      "B4:29:DD:1F:3F:3E:97:F3:B8:D6:91:57:57:DB:FF:CC:5E:AC:03:55:F7:16:D7:23:93:30:34:62:C4:07:1A:90"
+    ]
+  }
+}]
