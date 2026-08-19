@@ -173,6 +173,17 @@ if(location.hostname === "busgak.github.io"){
   body.elder .home-help{display:none;}
   body.elder .subtitle{display:none;}
   body.elder .depart-sub{font-size:16px;}
+  /* 어르신 모드: 다음 버스(첫 카드)는 초대형, 보조 텍스트 대비 강화 */
+  body.elder{--sub:#c2c2ca;}
+  body.elder .depart-card.best{padding:20px 18px 18px;}
+  body.elder .depart-card.best .depart-main{font-size:44px; line-height:1.1;}
+  body.elder .depart-card.best .busno{font-size:20px; padding:6px 16px;}
+  body.elder .depart-card.best .depart-sub{font-size:18px; margin-top:10px;}
+  .elder-only{display:none !important;}
+  body.elder .elder-only{display:inline-flex !important;}
+  @media (prefers-color-scheme: light){
+    body.elder{--sub:#4c4c54;}
+  }
 </style>
 </head>
 <body>
@@ -214,6 +225,7 @@ if(location.hostname === "busgak.github.io"){
   <div id="cards"></div>
   <div id="unmatched-hint"></div>
   <button class="btn" id="btn-refresh" onclick="manualRefresh()">지금 확인하기</button>
+  <button class="btn secondary elder-only" id="btn-replay" onclick="speakStatus()">소리로 다시 듣기</button>
   <div class="muted home-help" style="margin-top:10px">
     앱을 화면에 띄워두면 <b>언제든</b> 화면이 꺼지지 않고, 출발 5분 전부터 매분 소리·음성으로 알려드려요.
     앱을 닫아도 설정에서 <b>"앱이 꺼져 있어도 알림 받기"</b>를 켜두면 설정한 시간대·요일에 푸시로 알려드려요.
@@ -310,6 +322,7 @@ if(location.hostname === "busgak.github.io"){
     저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정 링크」를
     즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요.
   </div>
+  <div class="muted" id="app-version-label" style="margin-top:12px; text-align:center;"></div>
 </div>
 
 <!-- ================= 지도 정류장 선택 모달 ================= -->
@@ -355,7 +368,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v51";
+const APP_VERSION = "v52";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -791,18 +804,32 @@ async function pickNearbyStop(id, name, shortId){
 }
 /* 지도 모달 (Leaflet - 처음 열 때만 로드) */
 let leafletReady = null, mapObj = null, mapMarkers = [], mapFetchTimer = null;
-function loadLeaflet(){
-  if(leafletReady) return leafletReady;
-  leafletReady = new Promise((res, rej)=>{
-    const css = document.createElement("link"); css.rel = "stylesheet";
-    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+const LEAFLET_CDNS = [ // 첫 CDN이 막히거나 느린 환경(일부 통신사) 대비 예비 경로
+  "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/",
+  "https://unpkg.com/leaflet@1.9.4/dist/"
+];
+function loadLeafletFrom(base){
+  return new Promise((res, rej)=>{
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = base + "leaflet.css";
     document.head.appendChild(css);
     const js = document.createElement("script");
-    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    js.onload = () => res();
-    js.onerror = () => { leafletReady = null; rej(new Error("지도를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.")); };
+    js.src = base + "leaflet.js";
+    const to = setTimeout(()=>{ js.onload = js.onerror = null; rej(new Error("timeout")); }, 10000);
+    js.onload = () => { clearTimeout(to); res(); };
+    js.onerror = () => { clearTimeout(to); rej(new Error("load fail")); };
     document.head.appendChild(js);
   });
+}
+async function loadLeaflet(){
+  if(typeof L !== "undefined") return;
+  if(leafletReady) return leafletReady;
+  leafletReady = (async ()=>{
+    for(const base of LEAFLET_CDNS){
+      try{ await loadLeafletFrom(base); return; }catch(e){}
+    }
+    leafletReady = null;
+    throw new Error("지도를 불러오지 못했어요. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.");
+  })();
   return leafletReady;
 }
 async function openMapPicker(){
@@ -1079,7 +1106,10 @@ function render(){
     const depTime = new Date(now.getTime() + dep*1000);
     const arrTime = new Date(now.getTime() + arr*1000);
     const urg = dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good";
-    const label = dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가요`;
+    // 어르신 모드: 초 단위 없이 분으로만 크게 (읽기 부담 최소화)
+    const label = elderMode
+      ? (dep <= 40 ? `<em>지금 나가세요!</em>` : `<em>${Math.max(1, Math.round(dep/60))}분</em> 뒤에 나가요`)
+      : (dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가요`);
     html += `
     <div class="depart-card ${urg} ${rank===1?"best":""}">
       <div class="dc-head">
@@ -1349,6 +1379,21 @@ function toggleElderMode(on){
   store.set("busgakElderMode", elderMode ? "1" : "0");
   applyElderMode();
   if(elderMode && !voiceOn) toggleVoice(); // 켜면 음성 안내도 함께
+  render(); // 시간 표기 방식(초 생략)이 바뀌므로 즉시 다시 그림
+}
+/* 어르신 모드: 현재 버스 상황을 음성으로 다시 읽어주기 */
+function speakStatus(){
+  if(!voiceOn){ voiceOn = true; store.set("busAlarmVoiceGlobal", "1"); updateVoiceIcon(); }
+  if(!lastFetchAt || !cachedOpts.length){ speak("지금은 나갈 버스 정보가 없어요."); return; }
+  const elapsed = (Date.now() - lastFetchAt.getTime())/1000;
+  const parts = [];
+  for(const o of cachedOpts.slice(0, 2)){
+    const dep = o.departSec - elapsed;
+    if(dep <= -30) continue;
+    if(dep <= 40) parts.push(busNoSpeech(o.busNo) + "번 버스, 지금 나가세요");
+    else parts.push(busNoSpeech(o.busNo) + "번 버스, " + Math.max(1, Math.round(dep/60)) + "분 뒤에 나가세요");
+  }
+  speak(parts.length ? parts.join(". ") + "." : "지금은 나갈 버스 정보가 없어요.");
 }
 function speak(text){
   if(!voiceOn){ logEvt("음성 꺼짐 상태"); return; }
@@ -2004,6 +2049,7 @@ loadConfig();
 initProfiles();
 initVoicePref();
 initElderMode();
+document.getElementById("app-version-label").textContent = "버스각 " + APP_VERSION;
 renderProfileChips();
 fillForm();
 updateSetupHint();
