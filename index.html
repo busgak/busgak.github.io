@@ -372,7 +372,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v55";
+const APP_VERSION = "v56";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -785,7 +785,9 @@ async function fetchNearby(la, lo){
   // 서울 시내버스 정류장은 TAGO 좌표검색에 안 나와서 서울 API(getStationByPos)를 병행 조회해 합침
   if(inSeoulArea(la, lo)){
     jobs.push(seoulCall("stationinfo/getStationByPos", {tmX: lo.toFixed(6), tmY: la.toFixed(6), radius: 500})
-      .then(items => (items||[]).filter(it => it && it.arsId && String(it.arsId) !== "0").map(it => ({
+      .then(items => (items||[]).filter(it => it && it.arsId && String(it.arsId) !== "0"
+        && !/미정차|\(가상\)/.test(String(it.stationNm||"")) // 정차하지 않는 지점·가상 노드는 제외
+      ).map(it => ({
         id: String(it.arsId), ids: [String(it.arsId)], nm: String(it.stationNm||""), shortId: String(it.arsId),
         admin: "", lat: Number(it.gpsY)||null, lng: Number(it.gpsX)||null,
         dist: it.dist != null ? Math.round(Number(it.dist)) : null
