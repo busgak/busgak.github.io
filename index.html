@@ -263,7 +263,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v43";
+const APP_VERSION = "v44";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 /* API 키는 서버(프록시)에만 보관됨 - 앱은 프록시를 통해서만 데이터를 요청 */
@@ -1239,6 +1239,75 @@ function stabilizeOpts(newOpts){
     }
   }
 }
+/* ---------- 위치 기반 보정 (v44): 도착예측(60~90초 갱신)보다 빠른 버스 위치(10~20초 갱신)로
+   임박 버스의 정류장 통과를 감지해 카운트다운을 사이사이 재보정한다 ---------- */
+const posTrack = new Map(); // routeId -> {S(우리 정류장 순번), veh, ord, at}
+let posBusy = false;
+async function positionCorrect(){
+  try{
+    if(provider() !== "tago" || !lastFetchAt || posBusy || document.hidden) return;
+    const nowMs = Date.now();
+    const elapsed = () => (Date.now() - lastFetchAt.getTime())/1000;
+    const targets = new Map(); // 8분 이내 버스만, 노선당 가장 임박한 1대
+    for(const o of cachedOpts){
+      const dep = o.departSec - elapsed();
+      if(dep <= 0 || dep > 480 || !o.routeId) continue;
+      const prev = targets.get(o.routeId);
+      if(!prev || o.estSec < prev.estSec) targets.set(o.routeId, o);
+    }
+    if(!targets.size) return;
+    posBusy = true;
+    for(const [rid, o] of targets){
+      let items = null;
+      try{ items = await tagoCall("BusLcInfoInqireService", "getRouteAcctoBusLcList", {routeId: rid}); }catch(e){ continue; }
+      if(!items || !items.length) continue;
+      const ords = items.map(it => ({veh: String(it.vehicleno||""), ord: parseInt(it.nodeord,10)}))
+        .filter(v => v.veh && !isNaN(v.ord));
+      if(!ords.length) continue;
+      const rest = parseInt(o.restStops, 10);
+      let tr = posTrack.get(rid);
+      const anchorValid = tr && (nowMs - tr.at < 5*60*1000) && ords.some(v => v.veh === tr.veh && v.ord <= tr.S);
+      if(!anchorValid){
+        // 앵커 설정: 우리 정류장 순번(S) = 차량 순번 + 남은 정거장 수. 같은 노선 도착이 2건이면 교차검증
+        if(isNaN(rest) || rest < 1) continue;
+        const counts = cachedOpts.filter(x => x.routeId === rid).map(x => parseInt(x.restStops,10))
+          .filter(n => !isNaN(n) && n >= 1).sort((a,b)=>a-b);
+        let S = null;
+        for(const va of ords.slice().sort((a,b)=>b.ord-a.ord)){
+          const cand = va.ord + counts[0];
+          if(counts.length >= 2){
+            const need = cand - counts[1];
+            if(ords.some(vb => Math.abs(vb.ord - need) <= 1)){ S = cand; break; }
+          }else{ S = cand; break; }
+        }
+        if(S == null) continue;
+        const mine = ords.filter(v => v.ord <= S).sort((a,b)=>b.ord-a.ord)[0];
+        if(mine) posTrack.set(rid, {S, veh: mine.veh, ord: mine.ord, at: nowMs});
+        continue; // 앵커만 잡고, 보정은 다음 관측부터
+      }
+      const cur = ords.find(v => v.veh === tr.veh);
+      if(!cur) continue;
+      if(cur.ord > tr.ord){
+        const remOld = Math.max(1, tr.S - tr.ord);
+        const remNew = Math.max(0, tr.S - cur.ord);
+        const el = elapsed();
+        const curRem = Math.max(0, o.estSec - el);
+        let target = curRem * (remNew / remOld);
+        target = Math.max(target, curRem * 0.6); // 한 번에 최대 40%만 축소 (오매칭 안전장치)
+        if(target < curRem - 5){
+          o.estSec = target + el;
+          o.departSec = o.estSec - config.walkMin*60;
+          o.restStops = String(remNew);
+          logEvt("위치 보정: "+o.busNo+" "+remOld+"→"+remNew+"정거장");
+        }
+        tr.ord = cur.ord; tr.at = nowMs;
+      }else{
+        tr.at = nowMs;
+      }
+    }
+  }catch(e){}
+  finally{ posBusy = false; }
+}
 function isBusWaiting(busNo){
   const f = apiFreshness.get(normBusNo(busNo));
   return f && (Date.now() - f.since) > 180000; // 3분 넘게 원본 예측 정지 = 차량 정차/대기 추정
@@ -1313,6 +1382,7 @@ setInterval(()=>{
       return dep > -60 && dep <= 5*60;
     });
     if(tick % (urgent ? 10 : 30) === 0 && !document.hidden) doFetch();
+    if(tick % 20 === 7) positionCorrect(); // 20초마다 위치 기반 카운트다운 보정
     if(tick % 15 === 0) updateWakeLock();
     if(tick % 10 === 0 && "speechSynthesis" in window){
       try{
