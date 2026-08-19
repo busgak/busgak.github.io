@@ -284,8 +284,10 @@ if(location.hostname === "busgak.github.io"){
       <button class="btn small secondary" onclick="renameProfile()">이름 변경</button>
       <button class="btn small secondary" onclick="deleteProfile()">프로필 삭제</button>
       <button class="btn small secondary" onclick="shareProfile()">이 설정 공유</button>
+      <button class="btn small secondary" onclick="receiveSharedProfile()">공유받기</button>
     </div>
-    <div class="muted" style="margin-top:8px">「이 설정 공유」로 링크를 보내면 받는 분은 <b>열기만 하면</b> 정류장·버스가 그대로 적용돼요. 부모님 폰 설정해 드릴 때 편해요.</div>
+    <div class="muted" style="margin-top:8px">「이 설정 공유」로 링크를 보내면 받는 분은 <b>열기만 하면</b> 적용돼요.
+    이미 버스각 앱이 있는 분은 카톡에서 링크를 <b>길게 눌러 복사</b>한 뒤 여기 <b>공유받기</b>를 누르면 돼요.</div>
   </div>
 
   <div class="card">
@@ -412,7 +414,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v66";
+const APP_VERSION = "v67";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -466,27 +468,61 @@ function loadConfig(){
   config.apiKey = ""; // 키는 서버에만 있음 (클라이언트 미보관)
   if(fromHash) persistConfig();
 }
-/* 공유 링크로 받은 설정을 프로필로 적용 (기존 사용자면 새 프로필로 추가, 같은 설정이면 그 프로필로 전환) */
+/* 공유받은 설정을 프로필로 적용 (기존 사용자면 새 프로필로 추가, 같은 설정이면 그 프로필로 전환) */
+function applySharedData(d){
+  const dup = profiles.list.findIndex(p => p.data && p.data.stopId === d.stopId &&
+    JSON.stringify(p.data.buses||[]) === JSON.stringify(d.buses||[]));
+  if(dup >= 0){
+    applyProfile(dup);
+  }else{
+    const data = snapshotConfig(); // 최신 필드 형태 유지 + 받은 값 덮어쓰기
+    Object.assign(data, JSON.parse(JSON.stringify(d)));
+    delete data.apiKey;
+    data.pushOn = false; // 푸시는 받은 사람이 직접 켜도록
+    profiles.list.push({name: String(d.shareName || "공유받음").slice(0,10), data});
+    applyProfile(profiles.list.length - 1);
+  }
+  showToast("공유받은 설정을 적용했어요");
+}
 function applyImportedCfg(){
   if(!importedCfg || !importedCfg.stopId) return;
   // 카카오 인앱에서는 URL을 지우지 않음: "브라우저로 열기"가 현재 주소를 그대로 가져가야 설정이 함께 넘어감
   if(!/KAKAOTALK/i.test(navigator.userAgent)){
     try{ history.replaceState(null, "", location.pathname); }catch(e){} // 해시·쿼리 제거 (새로고침 시 중복 방지)
   }
-  const dup = profiles.list.findIndex(p => p.data && p.data.stopId === importedCfg.stopId &&
-    JSON.stringify(p.data.buses||[]) === JSON.stringify(importedCfg.buses||[]));
-  if(dup >= 0){
-    applyProfile(dup);
-  }else{
-    const data = snapshotConfig(); // 최신 필드 형태 유지 + 받은 값 덮어쓰기
-    Object.assign(data, JSON.parse(JSON.stringify(importedCfg)));
-    delete data.apiKey;
-    data.pushOn = false; // 푸시는 받은 사람이 직접 켜도록
-    profiles.list.push({name: String(importedCfg.shareName || "공유받음").slice(0,10), data});
-    applyProfile(profiles.list.length - 1);
-  }
-  showToast("공유받은 설정을 적용했어요");
+  applySharedData(importedCfg);
   importedCfg = null;
+}
+/* 링크 텍스트(또는 페이로드)에서 공유 설정 추출 */
+function parseSharePayload(text){
+  if(!text) return null;
+  let p = String(text).trim();
+  const m = p.match(/#([A-Za-z0-9+\/=%._-]+)/) || p.match(/[?&]cfg=([^&\s]+)/);
+  if(m) p = m[1];
+  try{ p = decodeURIComponent(p); }catch(e){}
+  try{
+    const d = JSON.parse(decodeURIComponent(escape(atob(p))));
+    return (d && d.stopId) ? d : null;
+  }catch(e){ return null; }
+}
+/* 설치된 앱에서 공유받기: 카톡에서 복사한 링크를 붙여넣어 바로 적용 */
+async function receiveSharedProfile(){
+  let d = null;
+  // 1) 클립보드에 공유 링크가 있으면 자동 인식
+  try{
+    if(navigator.clipboard && navigator.clipboard.readText){
+      d = parseSharePayload(await navigator.clipboard.readText());
+    }
+  }catch(e){ /* 권한 거부 등 → 붙여넣기로 진행 */ }
+  // 2) 없으면 직접 붙여넣기
+  if(!d){
+    const t = prompt("공유받은 링크를 붙여넣으세요:\n(카톡에서 링크를 길게 눌러 '복사' 후)");
+    if(t === null) return;
+    d = parseSharePayload(t);
+  }
+  if(!d){ alert("공유 링크를 인식하지 못했어요.\n카톡에서 링크를 길게 눌러 '복사'한 뒤 다시 [공유받기]를 눌러주세요."); return; }
+  applySharedData(d);
+  showView("home");
 }
 /* 활성 프로필을 링크로 공유 (받는 사람은 열기만 하면 적용) */
 async function shareProfile(){
@@ -495,7 +531,8 @@ async function shareProfile(){
   delete c.apiKey; c.pushOn = false;
   c.shareName = (profiles.list[profiles.active] && profiles.list[profiles.active].name) || "공유받음";
   const link = "https://busgak.github.io/#" + btoa(unescape(encodeURIComponent(JSON.stringify(c))));
-  const text = (config.stopName||"정류장") + " · " + (config.buses||[]).join(", ") + "번 설정이에요. 열면 바로 적용돼요!";
+  const text = (config.stopName||"정류장") + " · " + (config.buses||[]).join(", ") + "번 설정이에요. 열면 바로 적용돼요! " +
+    "(버스각 앱이 이미 있으면: 링크 길게 눌러 복사 → 버스각 설정 → 공유받기)";
   if(navigator.share){
     try{ await navigator.share({title: "버스각 설정 공유", text, url: link}); return; }
     catch(e){ if(e && e.name === "AbortError") return; }
