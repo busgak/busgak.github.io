@@ -280,10 +280,12 @@ if(location.hostname === "busgak.github.io"){
     <div class="muted" style="margin-top:8px">
       집·회사처럼 장소마다 정류장과 시간을 다르게 저장할 수 있어요. 아래 설정은 <b>선택된 프로필</b>에 저장돼요.
     </div>
-    <div style="display:flex; gap:6px; margin-top:10px;">
+    <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
       <button class="btn small secondary" onclick="renameProfile()">이름 변경</button>
       <button class="btn small secondary" onclick="deleteProfile()">프로필 삭제</button>
+      <button class="btn small secondary" onclick="shareProfile()">이 설정 공유</button>
     </div>
+    <div class="muted" style="margin-top:8px">「이 설정 공유」로 링크를 보내면 받는 분은 <b>열기만 하면</b> 정류장·버스가 그대로 적용돼요. 부모님 폰 설정해 드릴 때 편해요.</div>
   </div>
 
   <div class="card">
@@ -410,7 +412,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v64";
+const APP_VERSION = "v65";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -437,13 +439,15 @@ let config = {
   manualMap:{}         // (구버전 호환용)
 };
 
+let importedCfg = null; // 공유 링크(해시)로 받은 설정 - initProfiles 뒤에 새 프로필로 적용
 function loadConfig(){
-  // 1) URL 해시 우선
+  // 1) URL 해시 우선 (프로필 공유 링크)
   let fromHash = false;
   if(location.hash.length > 1){
     try{
       const decoded = JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
       config = Object.assign(config, decoded);
+      importedCfg = decoded;
       fromHash = true;
     }catch(e){ /* 해시가 설정이 아니면 무시 */ }
   }
@@ -455,6 +459,40 @@ function loadConfig(){
   // 3) API 키는 항상 별도 저장소에서 (해시에 키가 있으면 그걸 우선하고 별도 저장)
   config.apiKey = ""; // 키는 서버에만 있음 (클라이언트 미보관)
   if(fromHash) persistConfig();
+}
+/* 공유 링크로 받은 설정을 프로필로 적용 (기존 사용자면 새 프로필로 추가, 같은 설정이면 그 프로필로 전환) */
+function applyImportedCfg(){
+  if(!importedCfg || !importedCfg.stopId) return;
+  try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){} // 해시 제거 (새로고침 시 중복 방지)
+  const dup = profiles.list.findIndex(p => p.data && p.data.stopId === importedCfg.stopId &&
+    JSON.stringify(p.data.buses||[]) === JSON.stringify(importedCfg.buses||[]));
+  if(dup >= 0){
+    applyProfile(dup);
+  }else{
+    const data = snapshotConfig(); // 최신 필드 형태 유지 + 받은 값 덮어쓰기
+    Object.assign(data, JSON.parse(JSON.stringify(importedCfg)));
+    delete data.apiKey;
+    data.pushOn = false; // 푸시는 받은 사람이 직접 켜도록
+    profiles.list.push({name: String(importedCfg.shareName || "공유받음").slice(0,10), data});
+    applyProfile(profiles.list.length - 1);
+  }
+  showToast("공유받은 설정을 적용했어요");
+  importedCfg = null;
+}
+/* 활성 프로필을 링크로 공유 (받는 사람은 열기만 하면 적용) */
+async function shareProfile(){
+  if(!config.stopId || !(config.buses||[]).length){ alert("먼저 정류장과 버스를 설정하고 저장해 주세요."); return; }
+  const c = {...config};
+  delete c.apiKey; c.pushOn = false;
+  c.shareName = (profiles.list[profiles.active] && profiles.list[profiles.active].name) || "공유받음";
+  const link = "https://busgak.github.io/#" + btoa(unescape(encodeURIComponent(JSON.stringify(c))));
+  const text = (config.stopName||"정류장") + " · " + (config.buses||[]).join(", ") + "번 설정이에요. 열면 바로 적용돼요!";
+  if(navigator.share){
+    try{ await navigator.share({title: "버스각 설정 공유", text, url: link}); return; }
+    catch(e){ if(e && e.name === "AbortError") return; }
+  }
+  try{ await navigator.clipboard.writeText(link); showToast("공유 링크를 복사했어요"); }
+  catch(e){ prompt("아래 링크를 복사해 공유하세요:", link); }
 }
 function persistConfig(){
   // API 키는 제외하고 저장 (키는 별도 보관)
@@ -2270,6 +2308,7 @@ if(FEEDBACK_URL) document.getElementById("btn-feedback").classList.remove("hidde
 /* ---------- 초기화 ---------- */
 loadConfig();
 initProfiles();
+applyImportedCfg(); // 공유 링크로 열었으면 새 프로필로 적용
 initVoicePref();
 initAlarmPref();
 initElderMode();
