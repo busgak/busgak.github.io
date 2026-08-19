@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#111113">
+<meta name="theme-color" content="#0e0e11">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <title>버스각</title>
 <meta property="og:title" content="버스각">
 <meta property="og:description" content="지금 나가면 탈 수 있는 버스를 알려주는 출근 알람">
@@ -28,103 +29,128 @@ if(location.hostname === "busgak.github.io"){
 <style>
   :root{
     /* 모노크롬 그래파이트 팔레트. 색은 출발 임박도(good/warn/bad)에만 사용 */
-    --bg:#111113; --card:#1a1a1d; --card2:#232327; --line:#2b2b30; --line-strong:#3f3f46;
-    --text:#f4f4f5; --sub:#9c9ca4;
-    --btn-bg:#f4f4f5; --btn-fg:#131316;
+    --bg:#0e0e11; --card:#17171b; --card2:#212127; --line:#26262c; --line-strong:#3a3a42;
+    --text:#f5f5f7; --sub:#a0a0ab;
+    --btn-bg:#f5f5f7; --btn-fg:#131316;
     --good:#34d399; --warn:#fbbf24; --bad:#f87171;
-    /* 반경 체계: 카드 14px / 버튼·입력 10px / 칩 pill */
-    --radius:14px; --radius-ctl:10px;
+    /* 반경 체계: 카드 16px / 버튼·입력 12px / 칩·배지 pill */
+    --radius:16px; --radius-ctl:12px;
+    --focus-ring:0 0 0 3px rgba(160,160,171,.22);
   }
   *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%;}
   body{
-    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
-    background:var(--bg); color:var(--text); max-width:520px; margin:0 auto; padding:16px 14px 90px;
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
+    background:var(--bg); color:var(--text); max-width:520px; margin:0 auto; padding:18px 16px 96px;
+    font-feature-settings:"tnum";
   }
-  h1{font-size:21px; letter-spacing:-.02em; margin-bottom:2px;}
-  .subtitle{color:var(--sub); font-size:12.5px; margin-bottom:14px;}
-  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:12px;}
-  .card h2{font-size:13px; color:var(--sub); font-weight:700; margin-bottom:10px; letter-spacing:.02em;}
-  label{display:block; font-size:12.5px; color:var(--sub); margin:10px 0 5px;}
+  .apphead{display:flex; align-items:center; gap:10px; margin-bottom:16px;}
+  .applogo{width:34px; height:34px; border-radius:9px; flex:0 0 auto;}
+  h1{font-size:20px; font-weight:800; letter-spacing:-.02em; line-height:1.15;}
+  .subtitle{color:var(--sub); font-size:12.5px; margin-top:1px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:18px 16px; margin-bottom:12px;}
+  .card h2{font-size:12px; color:var(--sub); font-weight:700; margin-bottom:12px; letter-spacing:.04em;}
+  label{display:block; font-size:12.5px; color:var(--sub); margin:12px 0 6px;}
   input,select,button{font:inherit; color:inherit;}
   input[type=text],input[type=password],input[type=number],input[type=time]{
     width:100%; background:var(--card2); border:1px solid var(--line); border-radius:var(--radius-ctl);
-    padding:11px 12px; font-size:15px; outline:none;
+    padding:11px 13px; font-size:15px; outline:none; transition:border-color .15s, box-shadow .15s;
   }
-  input:focus{border-color:var(--line-strong);}
+  input:focus{border-color:var(--line-strong); box-shadow:var(--focus-ring);}
   .row{display:flex; gap:10px;}
   .row>*{flex:1;}
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
     background:var(--btn-bg); color:var(--btn-fg); border:none; border-radius:var(--radius-ctl);
-    padding:12px 16px; font-size:15px; font-weight:700; width:100%; margin-top:12px;
+    padding:13px 16px; font-size:15px; font-weight:700; width:100%; margin-top:12px;
+    transition:transform .12s ease, opacity .12s ease;
   }
   .btn.secondary{background:var(--card2); border:1px solid var(--line); color:var(--text); font-weight:600;}
-  .btn.small{width:auto; padding:8px 12px; font-size:13px; margin-top:0;}
-  .btn:active{transform:scale(.98);}
-  .muted{color:var(--sub); font-size:12px; line-height:1.55;}
-  .stop-result{max-height:230px; overflow-y:auto; margin-top:10px; border:1px solid var(--line); border-radius:10px;}
-  .stop-item{padding:11px 12px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px;}
+  .btn.small{width:auto; padding:8px 13px; font-size:13px; margin-top:0; border-radius:10px;}
+  .btn:active{transform:scale(.97);}
+  .muted{color:var(--sub); font-size:12px; line-height:1.6;}
+  .stop-result{max-height:230px; overflow-y:auto; margin-top:10px; border:1px solid var(--line); border-radius:var(--radius-ctl); background:var(--bg);}
+  .stop-item{padding:12px 13px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px; transition:background .12s;}
   .stop-item:last-child{border-bottom:none;}
   .stop-item:hover,.stop-item:active{background:var(--card2);}
   .stop-item .sid{color:var(--sub); font-size:12px;}
   .chip{display:inline-block; background:var(--card2); border:1px solid var(--line); border-radius:999px;
-    padding:4px 11px; font-size:12.5px; margin:3px 4px 0 0; color:var(--text);}
-  .chip.on{background:var(--btn-bg); border-color:var(--btn-bg); color:var(--btn-fg);}
+    padding:5px 12px; font-size:13px; margin:3px 4px 0 0; color:var(--text); transition:background .12s, color .12s;}
+  .chip.on{background:var(--btn-bg); border-color:var(--btn-bg); color:var(--btn-fg); font-weight:700;}
   /* main departure cards */
   .depart-card{
     background:var(--card); border:1px solid var(--line);
-    border-radius:var(--radius); padding:16px; margin-bottom:10px; position:relative; overflow:hidden;
+    border-radius:var(--radius); padding:15px 16px 14px; margin-bottom:10px; position:relative; overflow:hidden;
   }
-  .depart-card.best{border-color:var(--line-strong);}
-  .depart-card .accentbar{position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--good);}
-  .depart-main{font-size:26px; font-weight:800; line-height:1.2; font-variant-numeric:tabular-nums; letter-spacing:-.01em;}
-  .depart-main small{font-size:15px; font-weight:600; color:var(--sub);}
-  .depart-sub{margin-top:7px; font-size:13.5px; color:var(--sub); display:flex; flex-wrap:wrap; gap:4px 14px;}
-  .busno{display:inline-block; background:var(--btn-bg); color:var(--btn-fg); font-weight:800; font-size:14px;
-    border-radius:999px; padding:3px 11px; margin-right:8px; vertical-align:3px;}
-  .statuszone{margin:8px 0 12px; font-size:13px; color:var(--sub); display:flex; justify-content:space-between; align-items:center;}
-  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--sub); margin-right:5px;}
-  .dot.live{background:var(--good); box-shadow:0 0 8px var(--good);}
-  .err{background:#3a1f28; border:1px solid #7c3141; color:#ffb9c4; border-radius:10px;
-    padding:10px 12px; font-size:13px; margin:8px 0; line-height:1.5; word-break:break-all;}
-  .notice{background:var(--card2); border:1px solid var(--line-strong); color:var(--text); border-radius:10px;
-    padding:10px 12px; font-size:13px; margin:8px 0; line-height:1.5;}
+  .depart-card.u-good{--u:var(--good);}
+  .depart-card.u-warn{--u:var(--warn);}
+  .depart-card.u-bad{--u:var(--bad);}
+  .depart-card.best{
+    border-color:color-mix(in srgb, var(--u) 42%, var(--line));
+    background:linear-gradient(160deg, color-mix(in srgb, var(--u) 7%, var(--card)), var(--card) 55%);
+  }
+  .dc-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .dc-clock{font-size:13px; color:var(--sub); font-variant-numeric:tabular-nums; font-weight:600;}
+  .depart-main{font-size:29px; font-weight:800; line-height:1.15; font-variant-numeric:tabular-nums; letter-spacing:-.02em;}
+  .depart-main em{font-style:normal; color:var(--u);}
+  .depart-card:not(.best) .depart-main{font-size:21px;}
+  .depart-sub{margin-top:8px; font-size:13px; color:var(--sub); display:flex; flex-wrap:wrap; gap:4px 12px; font-variant-numeric:tabular-nums;}
+  .busno{display:inline-block; background:color-mix(in srgb, var(--u, var(--text)) 16%, transparent);
+    color:var(--u, var(--text)); border:1px solid color-mix(in srgb, var(--u, var(--text)) 34%, transparent);
+    font-weight:800; font-size:14px; border-radius:999px; padding:3px 12px;}
+  .statuszone{margin:0 2px 12px; font-size:12.5px; color:var(--sub); display:flex; justify-content:space-between; align-items:center;}
+  .dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--sub); margin-right:6px; vertical-align:1px;}
+  .dot.live{background:var(--good); box-shadow:0 0 7px var(--good);}
+  .err{background:#33202a; border:1px solid #6d2e3e; color:#ffb9c4; border-radius:var(--radius-ctl);
+    padding:11px 13px; font-size:13px; margin:8px 0; line-height:1.55; word-break:break-all;}
+  .notice{background:var(--card); border:1px solid var(--line-strong); color:var(--text); border-radius:var(--radius-ctl);
+    padding:11px 13px; font-size:13px; margin:8px 0; line-height:1.55;}
   .hidden{display:none !important;}
-  .tabbar{position:fixed; bottom:0; left:0; right:0; display:flex; max-width:520px; margin:0 auto;
-    background:rgba(17,17,19,.97); border-top:1px solid var(--line); backdrop-filter:blur(8px);}
-  .tabbar button{flex:1; background:none; border:none; border-top:2px solid transparent; color:var(--sub);
-    padding:14px 0 max(14px, env(safe-area-inset-bottom)); font-size:14.5px; font-weight:600; cursor:pointer;}
-  .tabbar button.on{color:var(--text); font-weight:800; border-top-color:var(--text);}
+  .tabbar{position:fixed; bottom:0; left:0; right:0; display:flex; gap:6px; max-width:520px; margin:0 auto;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    background:rgba(14,14,17,.86); border-top:1px solid var(--line);
+    backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);}
+  .tabbar button{flex:1; background:none; border:none; border-radius:11px; color:var(--sub);
+    padding:11px 0; font-size:14.5px; font-weight:600; cursor:pointer; transition:background .15s, color .15s;}
+  .tabbar button.on{color:var(--text); font-weight:800; background:var(--card2);}
   .maplist .stop-item{display:flex; justify-content:space-between; align-items:center; gap:8px;}
   .maplist input{width:90px; text-align:center; padding:8px;}
-  .bigclock{font-variant-numeric:tabular-nums; font-size:13px; color:var(--sub);}
-  .depart-sub{font-variant-numeric:tabular-nums;}
+  .bigclock{font-variant-numeric:tabular-nums; font-size:12.5px; color:var(--sub);}
   .voicerow{display:flex; justify-content:space-between; align-items:center; gap:10px;}
-  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
-    display:flex; align-items:flex-end; justify-content:center;}
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+    display:flex; align-items:flex-end; justify-content:center; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);}
   .modal-sheet{background:var(--card); border:1px solid var(--line); border-bottom:none;
     border-radius:var(--radius) var(--radius) 0 0; width:100%; max-width:520px;
-    padding:20px 18px calc(20px + env(safe-area-inset-bottom));}
+    padding:22px 18px calc(20px + env(safe-area-inset-bottom));}
   details{margin-top:10px;}
   summary{cursor:pointer; color:var(--sub); font-size:13px;}
   .footer-space{height:8px;}
   @media (prefers-color-scheme: light){
     :root{
-      --bg:#f5f5f6; --card:#ffffff; --card2:#ececee; --line:#e0e0e3; --line-strong:#c9c9cf;
-      --text:#1a1a1d; --sub:#69696f;
-      --btn-bg:#1a1a1d; --btn-fg:#ffffff;
+      --bg:#f4f4f6; --card:#ffffff; --card2:#ebebee; --line:#e1e1e5; --line-strong:#c8c8cf;
+      --text:#18181b; --sub:#66666e;
+      --btn-bg:#18181b; --btn-fg:#ffffff;
       --good:#059669; --warn:#d97706; --bad:#dc2626;
+      --focus-ring:0 0 0 3px rgba(102,102,110,.18);
     }
-    .tabbar{background:rgba(255,255,255,.96);}
+    .tabbar{background:rgba(244,244,246,.86);}
     .err{background:#fdecef; border-color:#f3b6c0; color:#a12338;}
+    .depart-card.best{background:linear-gradient(160deg, color-mix(in srgb, var(--u) 6%, var(--card)), var(--card) 55%);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
   }
 </style>
 </head>
 <body>
 
-<h1>버스각</h1>
-<div class="subtitle">지금 나가면 탈 수 있는 버스를 알려줘요 · 전국 실시간 도착정보</div>
+<header class="apphead">
+  <img src="icon-192.png" class="applogo" alt="" onerror="this.style.display='none'">
+  <div>
+    <h1>버스각</h1>
+    <div class="subtitle">지금 나가면 탈 수 있는 버스를 알려줘요</div>
+  </div>
+</header>
 
 <!-- ================= HOME ================= -->
 <div id="view-home">
@@ -263,7 +289,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v44";
+const APP_VERSION = "v45";
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 /* API 키는 서버(프록시)에만 보관됨 - 앱은 프록시를 통해서만 데이터를 요청 */
@@ -848,21 +874,22 @@ function render(){
     rank++;
     const depTime = new Date(now.getTime() + dep*1000);
     const arrTime = new Date(now.getTime() + arr*1000);
-    const color = dep <= 3*60 ? "var(--bad)" : dep <= 7*60 ? "var(--warn)" : "var(--good)";
-    const label = dep <= 0 ? "지금 출발!" : fmtMin(dep) + " 출발";
+    const urg = dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good";
+    const label = dep <= 10 ? `<em>지금 출발!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤 출발`;
     html += `
-    <div class="depart-card ${rank===1?"best":""}">
-      <div class="accentbar" style="background:${color}"></div>
-      <div style="margin-left:8px">
-        <div class="depart-main"><span class="busno">${o.busNo}</span>${label} <small>(${fmtHM(depTime)} 출발)</small></div>
-        <div class="depart-sub">
-          <span>${fmtHM(arrTime)} 정류장 도착 예정</span>
-          ${o.restStops?`<span>${o.restStops}정거장 전</span>`:""}
-          ${isBusWaiting(o.busNo)?`<span style="color:var(--warn)">차량 대기 중 · 시간 변동 가능</span>`:""}
-          ${o.lastStopName?`<span>(${o.lastStopName} 통과)</span>`:""}
-          ${o.low==="1"?`<span>저상</span>`:""}
-          ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
-        </div>
+    <div class="depart-card ${urg} ${rank===1?"best":""}">
+      <div class="dc-head">
+        <span class="busno">${o.busNo}</span>
+        <span class="dc-clock">${fmtHM(depTime)} 출발</span>
+      </div>
+      <div class="depart-main">${label}</div>
+      <div class="depart-sub">
+        <span>${fmtHM(arrTime)} 정류장 도착 예정</span>
+        ${o.restStops?`<span>${o.restStops}정거장 전</span>`:""}
+        ${isBusWaiting(o.busNo)?`<span style="color:var(--warn)">차량 대기 중 · 시간 변동 가능</span>`:""}
+        ${o.lastStopName?`<span>(${o.lastStopName} 통과)</span>`:""}
+        ${o.low==="1"?`<span>저상</span>`:""}
+        ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
       </div>
     </div>`;
   }
