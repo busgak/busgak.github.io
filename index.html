@@ -393,7 +393,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v58";
+const APP_VERSION = "v59";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1598,9 +1598,10 @@ function testVoice(){
   notify("곧 나가기 · 테스트", "알림이 이렇게 와요", 3, "테스트입니다. 223번 버스, 3분 뒤에 나가세요.", true);
 }
 function notify(title, body, soundTimes, speech, force){
-  if(!alarmOn && force !== true) return; // 앱 내 알람 꺼짐 (헤더 종 버튼) - 테스트 버튼만 예외
-  beep(soundTimes||2);
+  // 역할 분리: 종 버튼 = 배너·삐 소리 / 스피커 버튼 = 음성 (speak 안에서 voiceOn 검사)
   if(speech) speak(speech);
+  if(!alarmOn && force !== true) return; // 종 꺼짐이면 배너·소리는 생략 (테스트 버튼만 예외)
+  beep(soundTimes||2);
   if(("Notification" in window) && Notification.permission==="granted"){
     // 모바일에서는 new Notification()이 막혀 있어 서비스워커 경유로 표시
     try{
