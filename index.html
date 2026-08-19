@@ -60,11 +60,12 @@ if(location.hostname === "busgak.github.io"){
   .card h2{font-size:12px; color:var(--sub); font-weight:700; margin-bottom:12px; letter-spacing:.04em;}
   label{display:block; font-size:12.5px; color:var(--sub); margin:12px 0 6px;}
   input,select,button{font:inherit; color:inherit;}
-  input[type=text],input[type=password],input[type=number],input[type=time]{
+  input[type=text],input[type=password],input[type=number],input[type=time],textarea{
     width:100%; background:var(--card2); border:1px solid var(--line); border-radius:var(--radius-ctl);
     padding:11px 13px; font-size:15px; outline:none; transition:border-color .15s, box-shadow .15s;
   }
-  input:focus{border-color:var(--line-strong); box-shadow:var(--focus-ring);}
+  textarea{resize:vertical; min-height:76px; font-family:inherit; line-height:1.5;}
+  input:focus,textarea:focus{border-color:var(--line-strong); box-shadow:var(--focus-ring);}
   .row{display:flex; gap:10px;}
   .row>*{flex:1;}
   .btn{
@@ -311,6 +312,16 @@ if(location.hostname === "busgak.github.io"){
   </div>
 
   <div class="card">
+    <h2>개발자에게 요청하기</h2>
+    <label>불편한 점이나 있었으면 하는 기능을 적어 보내주세요. 하나하나 읽고 반영해요.</label>
+    <textarea id="in-feedback" maxlength="1000" placeholder="예: 하차 알림도 있으면 좋겠어요"></textarea>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+      <button class="btn small secondary" type="button" onclick="sendFeedback()">보내기</button>
+      <span id="feedback-status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>화면</h2>
     <label style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
       <input type="checkbox" id="in-elder" onchange="toggleElderMode(this.checked)" style="width:18px; height:18px; accent-color:var(--btn-bg);">
@@ -372,7 +383,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v56";
+const APP_VERSION = "v57";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -476,12 +487,37 @@ function applyProfile(i){
     cachedOpts = []; lastArrivalsRaw = []; lastFetchAt = null;
   }
   quietPushSync(); // 푸시 설정도 새 프로필 기준으로 갱신 (지연 실행)
+  doFetch(); // 먼저 호출해 fetching 플래그를 켬 → 캐시가 없어도 아래 render()가 로딩 카드를 즉시 표시
   renderProfileChips(); updateSetupHint(); render();
   // 설정 화면이 열려 있을 때만 폼(노선 목록 포함) 갱신
   if(!document.getElementById("view-settings").classList.contains("hidden")) fillForm();
   document.getElementById("unmatched-hint").innerHTML = "";
-  doFetch(); // 최신 데이터는 뒤에서 갱신
 }
+/* 비활성 프로필 도착정보를 미리 받아둠 → 프로필 전환 시 즉시 표시 */
+let prefetching = false;
+async function prefetchProfiles(){
+  if(prefetching || fetching || document.hidden) return;
+  if(!document.getElementById("view-settings").classList.contains("hidden")) return; // 설정 편집 중엔 config를 건드리지 않음
+  prefetching = true;
+  try{
+    for(let i = 0; i < profiles.list.length && i < 5; i++){
+      if(i === profiles.active) continue;
+      const d = profiles.list[i].data;
+      if(!d || !d.stopId || !(d.buses||[]).length) continue;
+      const c = profileCache.get(i);
+      if(c && Date.now() - c.at.getTime() < 60*1000) continue; // 1분 이내 데이터면 충분
+      const backup = JSON.parse(JSON.stringify(config));
+      try{
+        Object.assign(config, JSON.parse(JSON.stringify(d)));
+        const {opts} = await computeOptions();
+        profileCache.set(i, {opts, raw: [], at: new Date()});
+      }catch(e){ /* 프리페치 실패는 무시 */ }
+      Object.assign(config, backup);
+    }
+  }finally{ prefetching = false; }
+}
+setInterval(prefetchProfiles, 90*1000);
+setTimeout(prefetchProfiles, 5000);
 function switchProfile(i){
   if(i === profiles.active) return;
   profiles.list[profiles.active].data = snapshotConfig(); // 현재 상태 저장 후 전환
@@ -1173,7 +1209,13 @@ function fmtMin(sec){
 function render(){
   const cardsEl = document.getElementById("cards");
   const now = new Date();
-  if(!lastFetchAt){ cardsEl.innerHTML=""; return; }
+  if(!lastFetchAt){
+    // 데이터를 받아오는 중이면 빈 화면 대신 로딩 카드 (프로필 전환 직후 끊김 방지)
+    cardsEl.innerHTML = fetching
+      ? '<div class="depart-card"><div class="depart-main" style="font-size:17px; color:var(--sub)">도착정보 불러오는 중…</div></div>'
+      : "";
+    return;
+  }
   const elapsed = (now - lastFetchAt)/1000;
 
   let html = "";
@@ -1505,6 +1547,23 @@ function speak(text){
       }catch(e){ logEvt("음성 예외"); }
     }, 200);
   }catch(e){ logEvt("음성 예외2"); }
+}
+/* 개발자에게 요청하기: 앱 내에서 바로 의견 전송 (서버 KV에 저장) */
+async function sendFeedback(){
+  const ta = document.getElementById("in-feedback");
+  const st = document.getElementById("feedback-status");
+  const text = (ta.value || "").trim();
+  if(!text){ st.textContent = "내용을 입력해 주세요."; return; }
+  st.textContent = "보내는 중…";
+  try{
+    const r = await fetch(PUSH_SERVER + "/feedback", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text: text.slice(0,1000), meta: {v: APP_VERSION, city: config.cityName || "", ua: navigator.userAgent.slice(0,80)}})
+    });
+    if(!r.ok) throw new Error();
+    ta.value = "";
+    st.textContent = "전달됐어요. 소중한 의견 감사합니다!";
+  }catch(e){ st.textContent = "전송 실패. 잠시 후 다시 시도해 주세요."; }
 }
 function testVoice(){
   // 실제 알람과 동일한 전체 경로 테스트: 배너 + 소리 + (켜져 있으면) 음성
