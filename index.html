@@ -145,18 +145,29 @@ if(location.hostname === "busgak.github.io"){
   details{margin-top:10px;}
   summary{cursor:pointer; color:var(--sub); font-size:13px;}
   .footer-space{height:8px;}
+  /* 라이트 테마: 시스템 라이트(강제 다크가 아닐 때) 또는 앱 설정에서 라이트 선택 시 */
   @media (prefers-color-scheme: light){
-    :root{
+    :root:not([data-theme="dark"]){
       --bg:#f4f4f6; --card:#ffffff; --card2:#ebebee; --line:#e1e1e5; --line-strong:#c8c8cf;
       --text:#18181b; --sub:#66666e;
       --btn-bg:#18181b; --btn-fg:#ffffff;
       --good:#059669; --warn:#d97706; --bad:#dc2626;
       --focus-ring:0 0 0 3px rgba(102,102,110,.18);
     }
-    .tabbar{background:rgba(244,244,246,.86);}
-    .err{background:#fdecef; border-color:#f3b6c0; color:#a12338;}
-    .depart-card.best{background:linear-gradient(160deg, color-mix(in srgb, var(--u) 6%, var(--card)), var(--card) 55%);}
+    :root:not([data-theme="dark"]) .tabbar{background:rgba(244,244,246,.86);}
+    :root:not([data-theme="dark"]) .err{background:#fdecef; border-color:#f3b6c0; color:#a12338;}
+    :root:not([data-theme="dark"]) .depart-card.best{background:linear-gradient(160deg, color-mix(in srgb, var(--u) 6%, var(--card)), var(--card) 55%);}
   }
+  :root[data-theme="light"]{
+    --bg:#f4f4f6; --card:#ffffff; --card2:#ebebee; --line:#e1e1e5; --line-strong:#c8c8cf;
+    --text:#18181b; --sub:#66666e;
+    --btn-bg:#18181b; --btn-fg:#ffffff;
+    --good:#059669; --warn:#d97706; --bad:#dc2626;
+    --focus-ring:0 0 0 3px rgba(102,102,110,.18);
+  }
+  :root[data-theme="light"] .tabbar{background:rgba(244,244,246,.86);}
+  :root[data-theme="light"] .err{background:#fdecef; border-color:#f3b6c0; color:#a12338;}
+  :root[data-theme="light"] .depart-card.best{background:linear-gradient(160deg, color-mix(in srgb, var(--u) 6%, var(--card)), var(--card) 55%);}
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
   }
@@ -194,8 +205,9 @@ if(location.hostname === "busgak.github.io"){
   .elder-only{display:none !important;}
   body.elder .elder-only{display:inline-flex !important;}
   @media (prefers-color-scheme: light){
-    body.elder{--sub:#4c4c54;}
+    :root:not([data-theme="dark"]) body.elder{--sub:#4c4c54;}
   }
+  :root[data-theme="light"] body.elder{--sub:#4c4c54;}
 </style>
 </head>
 <body>
@@ -344,15 +356,12 @@ if(location.hostname === "busgak.github.io"){
       어르신 모드 — 글씨를 키우고 음성 안내를 켜요
     </label>
     <div class="muted" style="margin-top:6px">부모님 폰에 설정해 드릴 때 켜두면 좋아요. (모든 프로필 공통)</div>
+    <label style="margin-top:14px">테마</label>
+    <div id="theme-chips"></div>
   </div>
 
   <button class="btn" onclick="saveSettings()">설정 저장</button>
-  <button class="btn secondary" onclick="copyConfigLink()">설정 링크 복사 (즐겨찾기용)</button>
   <button class="btn secondary hidden" id="btn-feedback" onclick="window.open(FEEDBACK_URL,'_blank')">의견 보내기 (개선 요청)</button>
-  <div class="muted" style="margin-top:10px">
-    저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정 링크」를
-    즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요.
-  </div>
   <div class="muted" id="app-version-label" style="margin-top:12px; text-align:center;"></div>
 </div>
 
@@ -399,7 +408,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v60";
+const APP_VERSION = "v61";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -455,12 +464,6 @@ function persistConfig(){
     profiles.list[profiles.active].data = JSON.parse(JSON.stringify(rest));
     saveProfiles();
   }
-}
-function configToHash(){
-  // 내장 키는 링크에 포함하지 않음
-  const c = {...config};
-  delete c.apiKey;
-  return "#" + btoa(unescape(encodeURIComponent(JSON.stringify(c))));
 }
 
 /* ---------- 프로필: 출발 장소별 설정 (집/회사 등) ---------- */
@@ -1513,6 +1516,37 @@ function showToast(msg){
   toastEl.classList.add("show");
   toastTimer = setTimeout(()=>toastEl.classList.remove("show"), 1000);
 }
+/* 테마 선택: 시스템 따름(기본) / 라이트 / 다크 - html의 data-theme 속성으로 강제 */
+let themePref = "system";
+function initThemePref(){
+  themePref = store.get("busgakTheme") || "system";
+  applyTheme();
+}
+function applyTheme(){
+  const html = document.documentElement;
+  if(themePref === "light" || themePref === "dark") html.setAttribute("data-theme", themePref);
+  else html.removeAttribute("data-theme");
+  renderThemeChips();
+  // 상태바(theme-color)도 함께 맞춤
+  const dark = themePref === "dark" ||
+    (themePref === "system" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  const m = document.querySelector('meta[name="theme-color"]');
+  if(m) m.setAttribute("content", dark ? "#0e0e11" : "#f4f4f6");
+}
+function setTheme(t){
+  themePref = t;
+  store.set("busgakTheme", t);
+  applyTheme();
+  showToast(t === "system" ? "시스템 테마를 따라요" : t === "dark" ? "다크 테마로 고정" : "라이트 테마로 고정");
+}
+function renderThemeChips(){
+  const el = document.getElementById("theme-chips");
+  if(!el) return;
+  el.innerHTML = [["system","시스템 따름"],["light","라이트"],["dark","다크"]].map(([v,n])=>
+    `<span class="chip ${themePref===v?"on":""}" onclick="setTheme('${v}')">${n}</span>`).join("");
+}
+try{ if(window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme); }catch(e){}
+
 /* 앱 내 알람(배너·소리·음성 알림) 전역 토글 - 화면을 직접 보는 중엔 알람이 필요 없는 사용자용.
    화면 카운트다운과 "앱 꺼져 있을 때" 서버 푸시 설정에는 영향 없음 */
 let alarmOn = true;
@@ -2043,24 +2077,6 @@ function saveSettings(){
   askNotifPerm();
   doFetch();
 }
-function copyConfigLink(){
-  saveQuiet();
-  const link = location.origin === "null" || location.protocol==="file:"
-    ? location.href.split("#")[0] + configToHash()
-    : location.href.split("#")[0] + configToHash();
-  history.replaceState(null,"",configToHash());
-  const doCopy = (t)=>{
-    if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
-    return Promise.reject();
-  };
-  doCopy(link).then(()=>alert("복사됐어요! 브라우저 즐겨찾기에 추가해 두세요."))
-    .catch(()=>prompt("아래 링크를 복사해서 즐겨찾기 하세요:", link));
-}
-function saveQuiet(){
-  const buses = document.getElementById("in-buses").value.split(",").map(s=>s.trim()).filter(Boolean);
-  if(buses.length) config.buses = buses;
-  persistConfig();
-}
 function updateSetupHint(){
   const need = !config.stopId || config.buses.length===0;
   document.getElementById("home-setup-hint").classList.toggle("hidden", !need);
@@ -2238,6 +2254,7 @@ initProfiles();
 initVoicePref();
 initAlarmPref();
 initElderMode();
+initThemePref();
 document.getElementById("app-version-label").textContent = "버스각 " + APP_VERSION;
 renderProfileChips();
 fillForm();
