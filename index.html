@@ -412,7 +412,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v65";
+const APP_VERSION = "v66";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -439,17 +439,23 @@ let config = {
   manualMap:{}         // (구버전 호환용)
 };
 
-let importedCfg = null; // 공유 링크(해시)로 받은 설정 - initProfiles 뒤에 새 프로필로 적용
+let importedCfg = null; // 공유 링크로 받은 설정 - initProfiles 뒤에 새 프로필로 적용
+let importedRaw = null; // 원본 페이로드 (카카오→Chrome 이동 시 설정을 실어 나르기 위해 보관)
 function loadConfig(){
-  // 1) URL 해시 우선 (프로필 공유 링크)
+  // 1) URL 해시(#페이로드) 또는 ?cfg= 쿼리 (카카오→Chrome 인텐트는 해시가 유실돼 쿼리로 전달)
   let fromHash = false;
-  if(location.hash.length > 1){
+  let payload = location.hash.length > 1 ? location.hash.slice(1) : null;
+  if(!payload){
+    try{ payload = new URLSearchParams(location.search).get("cfg"); }catch(e){}
+  }
+  if(payload){
     try{
-      const decoded = JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
+      const decoded = JSON.parse(decodeURIComponent(escape(atob(payload))));
       config = Object.assign(config, decoded);
       importedCfg = decoded;
+      importedRaw = payload;
       fromHash = true;
-    }catch(e){ /* 해시가 설정이 아니면 무시 */ }
+    }catch(e){ /* 설정 페이로드가 아니면 무시 */ }
   }
   // 2) 저장소 (해시가 없을 때만 일반 설정 로드)
   if(!fromHash){
@@ -463,7 +469,10 @@ function loadConfig(){
 /* 공유 링크로 받은 설정을 프로필로 적용 (기존 사용자면 새 프로필로 추가, 같은 설정이면 그 프로필로 전환) */
 function applyImportedCfg(){
   if(!importedCfg || !importedCfg.stopId) return;
-  try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){} // 해시 제거 (새로고침 시 중복 방지)
+  // 카카오 인앱에서는 URL을 지우지 않음: "브라우저로 열기"가 현재 주소를 그대로 가져가야 설정이 함께 넘어감
+  if(!/KAKAOTALK/i.test(navigator.userAgent)){
+    try{ history.replaceState(null, "", location.pathname); }catch(e){} // 해시·쿼리 제거 (새로고침 시 중복 방지)
+  }
   const dup = profiles.list.findIndex(p => p.data && p.data.stopId === importedCfg.stopId &&
     JSON.stringify(p.data.buses||[]) === JSON.stringify(importedCfg.buses||[]));
   if(dup >= 0){
@@ -2158,18 +2167,25 @@ function maybeShowInstall(){
   // 카카오톡 인앱 브라우저: 설치가 불가능한 환경이라 안내를 항상 표시 (닫으면 이번 접속만 숨김)
   if(/KAKAOTALK/i.test(ua)){
     try{ if(sessionStorage.getItem("kakaoHintClosed")==="1") return; }catch(e){}
+    // 공유 링크로 들어온 경우: 설정은 이미 적용됐음을 먼저 알림
+    const applied = importedRaw ? '<b>공유받은 설정은 적용됐어요!</b> 매일 쓰려면 앱으로 설치하는 게 편해요.<br><br>' : '';
     if(isAndroid){
-      body.innerHTML = '<div class="notice"><b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>' +
-        '아래 버튼을 누르면 Chrome이 열리고, 거기서 바로 설치할 수 있어요.</div>';
+      body.innerHTML = '<div class="notice">' + applied + '<b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>' +
+        '아래 버튼을 누르면 Chrome이 열리고, 거기서 바로 설치할 수 있어요.' +
+        (importedRaw ? ' 설정도 함께 넘어가요.' : '') + '</div>';
       mainBtn.classList.remove("hidden");
       mainBtn.textContent = "Chrome으로 열고 설치하기";
-      mainBtn.onclick = function(){ location.href = "intent://busgak.github.io/#Intent;scheme=https;package=com.android.chrome;end"; };
+      mainBtn.onclick = function(){
+        const cfg = importedRaw ? "?cfg=" + encodeURIComponent(importedRaw) : "";
+        location.href = "intent://busgak.github.io/" + cfg + "#Intent;scheme=https;package=com.android.chrome;end";
+      };
     }else{
-      body.innerHTML = '<div class="notice"><b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>딱 3단계면 돼요:<br><br>' +
+      body.innerHTML = '<div class="notice">' + applied + '<b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>딱 3단계면 돼요:<br><br>' +
         '<b>1.</b> 이 화면의 <b>공유하기</b> 버튼을 누르고<br>' +
         '&nbsp;&nbsp;&nbsp;<b>Safari로 열기</b>를 선택<br><br>' +
         'Safari가 열리면:<br><br>' + iosAddSteps(2) +
-        '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
+        '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!' +
+        (importedRaw ? '<br><span style="opacity:.75">공유받은 설정은 Safari에서도 그대로 적용돼요.</span>' : '') + '</div>';
       mainBtn.classList.add("hidden");
     }
     modal.classList.remove("hidden");
