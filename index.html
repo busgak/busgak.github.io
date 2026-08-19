@@ -289,7 +289,7 @@ if(location.hostname === "busgak.github.io"){
       </div>
     </div>
     <div id="map-canvas" style="height:58vh; border-radius:12px; overflow:hidden; background:var(--card2);"></div>
-    <div class="muted" style="margin-top:8px">지도를 움직이면 주변 정류장이 파란 점으로 표시돼요. 점을 누른 뒤 [이 정류장 선택]을 누르세요.</div>
+    <div id="map-status" class="muted" style="margin-top:8px">지도를 움직이면 주변 정류장이 파란 점으로 표시돼요. 점을 누른 뒤 [이 정류장 선택]을 누르세요.</div>
   </div>
 </div>
 
@@ -321,7 +321,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v47";
+const APP_VERSION = "v48";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -718,10 +718,18 @@ async function fetchNearby(la, lo){
 function geoPos(){
   return new Promise((res, rej)=>{
     if(!navigator.geolocation) return rej(new Error("이 기기는 위치 정보를 지원하지 않아요."));
+    const fail = (err)=>{
+      const why = err && err.code === 1 ? "위치 권한이 꺼져 있어요"
+        : err && err.code === 2 ? "위치를 확인할 수 없어요"
+        : "위치 확인이 오래 걸려요";
+      rej(new Error(why + ". 설치된 앱이라면 아이폰 설정 → 개인정보 보호 → 위치 서비스에서 허용하거나, Safari로 열어 권한을 허용해 주세요. (지도는 위치 없이도 움직여서 쓸 수 있어요)"));
+    };
     navigator.geolocation.getCurrentPosition(
       p => res(p.coords),
-      () => rej(new Error("위치 권한이 필요해요. 브라우저 설정에서 이 사이트의 위치 접근을 허용해 주세요.")),
-      {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
+      // 고정밀 실패 시 저정밀로 1회 재시도 (아이폰에서 고정밀만 실패하는 경우 대비)
+      () => navigator.geolocation.getCurrentPosition(p => res(p.coords), fail,
+        {enableHighAccuracy:false, timeout:8000, maximumAge:300000}),
+      {enableHighAccuracy:true, timeout:8000, maximumAge:60000});
   });
 }
 async function findNearby(){
@@ -775,18 +783,29 @@ async function mapToMyLoc(silent){
   try{
     const c = await geoPos();
     mapObj.setView([c.latitude, c.longitude], 17);
+    refreshMapStops(); // setView가 제자리여서 moveend가 안 나는 경우 대비
   }catch(e){
     if(silent !== true) alert(e.message);
+    else mapStatus("내 위치를 못 가져와 기본 위치를 보여드려요. " + e.message);
     refreshMapStops();
   }
 }
+function mapStatus(msg){
+  const el = document.getElementById("map-status");
+  if(el) el.textContent = msg;
+}
 async function refreshMapStops(){
-  if(!mapObj || mapObj.getZoom() < 15) return;
+  if(!mapObj) return;
+  if(mapObj.getZoom() < 15){ mapStatus("지도를 더 확대하면 정류장이 표시돼요."); return; }
   const c = mapObj.getCenter();
+  mapStatus("주변 정류장 찾는 중…");
   let stops = [];
-  try{ stops = await fetchNearby(c.lat, c.lng); }catch(e){ return; }
+  try{ stops = await fetchNearby(c.lat, c.lng); }
+  catch(e){ mapStatus("정류장 조회 실패: " + e.message); return; }
   for(const m of mapMarkers) mapObj.removeLayer(m);
   mapMarkers = [];
+  if(!stops.length){ mapStatus("이 위치 주변 500m 안에 정류장이 없어요. 지도를 움직여 보세요."); return; }
+  mapStatus("정류장 " + stops.length + "곳 표시됨. 파란 점을 누른 뒤 [이 정류장 선택]을 누르세요.");
   for(const s of stops){
     if(s.lat == null || isNaN(s.lat)) continue;
     const mk = L.circleMarker([s.lat, s.lng], {radius:9, color:"#1d4ed8", weight:2, fillColor:"#3b82f6", fillOpacity:.85}).addTo(mapObj);
