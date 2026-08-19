@@ -1,5 +1,5 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v45";
+const CACHE = "bus-alarm-v46";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -25,10 +25,17 @@ self.addEventListener("activate", e => {
 self.addEventListener("push", e => {
   let d = {};
   try { d = e.data.json(); } catch (err) { d = { title: "버스각", body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "버스각", {
-    body: d.body || "", tag: d.tag || "busgak", icon: "icon-192.png", badge: "icon-192.png",
-    vibrate: [200, 100, 200], renotify: true
-  }));
+  e.waitUntil((async () => {
+    // 앱이 화면에 떠서 보고 있는 중이면 OS 푸시 생략:
+    // 보고 있는 프로필은 앱 내 알람이 담당하고, 다른 프로필 푸시로 시끄럽지 않게 한다.
+    // 앱이 백그라운드(포커스 없음)면 기존대로 모든 프로필 푸시 표시.
+    const wins = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (wins.some(c => c.focused)) return;
+    await self.registration.showNotification(d.title || "버스각", {
+      body: d.body || "", tag: d.tag || "busgak", icon: "icon-192.png", badge: "icon-192.png",
+      vibrate: [200, 100, 200], renotify: true
+    });
+  })());
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();

@@ -289,7 +289,8 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v45";
+const APP_VERSION = "v46";
+const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 /* API 키는 서버(프록시)에만 보관됨 - 앱은 프록시를 통해서만 데이터를 요청 */
@@ -1177,8 +1178,9 @@ function checkAlarms(){
   // 앱이 켜져 있는 동안에는 시간대와 무관하게 항상 알림 (시간대·요일은 앱이 꺼졌을 때의 푸시에만 적용)
   const elapsed = (now-lastFetchAt)/1000;
   // 1분 카운트다운: 5분 30초 안에 들어오면 매분 안내 (5분 → 4분 → … → 1분 → 출발하세요)
+  // ALARM_LEAD: 예측이 낙관적으로 어긋나도 놓치지 않도록 알람만 앞당김 (화면 카운트다운은 원본 유지)
   for(const o of cachedOpts){
-    const dep = o.departSec - elapsed;
+    const dep = o.departSec - elapsed - ALARM_LEAD;
     if(dep > 330 || dep <= -60) continue;
     const nb = normBusNo(o.busNo);
     seenSoon.set(nb, nowMs);
