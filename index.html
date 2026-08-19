@@ -41,7 +41,8 @@ if(location.hostname === "busgak.github.io"){
   html,body{height:100%;}
   body{
     font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
-    background:var(--bg); color:var(--text); max-width:520px; margin:0 auto; padding:18px 16px 96px;
+    background:var(--bg); color:var(--text); max-width:520px; margin:0 auto;
+    padding:18px 16px calc(120px + env(safe-area-inset-bottom));
     font-feature-settings:"tnum";
   }
   .apphead{display:flex; align-items:center; gap:10px; margin-bottom:16px;}
@@ -408,7 +409,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v61";
+const APP_VERSION = "v62";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
