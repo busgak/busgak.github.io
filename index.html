@@ -410,7 +410,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v63";
+const APP_VERSION = "v64";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -2098,6 +2098,17 @@ window.addEventListener("beforeinstallprompt", function(e){
   deferredInstall = e;
   maybeShowInstall();
 });
+/* iOS 홈 화면 추가 경로는 버전에 따라 다름: 26+는 주소창 옆 ⋯ 메뉴, 그 전엔 하단 공유 버튼 */
+function iosMajor(){ const m = navigator.userAgent.match(/OS (\d+)_/); return m ? parseInt(m[1],10) : 0; }
+function iosAddSteps(startNo){
+  const n1 = startNo || 1, n2 = n1 + 1;
+  return iosMajor() >= 26
+    ? '<b>' + n1 + '.</b> 아래 주소창 오른쪽 <b>⋯ 버튼</b>을 누르고<br><br>' +
+      '<b>' + n2 + '.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br>' +
+      '<span style="opacity:.75">(목록에 없으면 ⋯ → 공유 → 홈 화면에 추가)</span><br><br>'
+    : '<b>' + n1 + '.</b> 아래 가운데 <b>공유 버튼</b>(위 화살표 아이콘)을 누르고<br><br>' +
+      '<b>' + n2 + '.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>';
+}
 function maybeShowInstall(){
   if(isStandalone()) return;
   const modal = document.getElementById("install-modal");
@@ -2119,8 +2130,7 @@ function maybeShowInstall(){
       body.innerHTML = '<div class="notice"><b>카카오톡 안에서는 앱 설치가 안 돼요.</b><br>딱 3단계면 돼요:<br><br>' +
         '<b>1.</b> 이 화면의 <b>공유하기</b> 버튼을 누르고<br>' +
         '&nbsp;&nbsp;&nbsp;<b>Safari로 열기</b>를 선택<br><br>' +
-        '<b>2.</b> Safari가 열리면 <b>오른쪽 아래 ⋯ 더보기</b>를 누르고<br><br>' +
-        '<b>3.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>' +
+        'Safari가 열리면:<br><br>' + iosAddSteps(2) +
         '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
       mainBtn.classList.add("hidden");
     }
@@ -2137,11 +2147,18 @@ function maybeShowInstall(){
     modal.classList.remove("hidden");
     return;
   }
-  // iOS Safari: 프롬프트가 없어 단계 안내
+  // iOS Safari: 프롬프트가 없어 단계 안내 (iOS 버전별 실제 경로)
   if(isIOSua){
-    body.innerHTML = '<div class="notice">딱 2단계면 돼요:<br><br>' +
-      '<b>1.</b> <b>오른쪽 아래 ⋯ 더보기</b> 또는 <b>공유 버튼</b>(위로 화살표)을 누르고<br><br>' +
-      '<b>2.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>' +
+    body.innerHTML = '<div class="notice">딱 2단계면 돼요:<br><br>' + iosAddSteps(1) +
+      '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
+    mainBtn.classList.add("hidden");
+    modal.classList.remove("hidden");
+    return;
+  }
+  // 안드로이드인데 자동 설치 프롬프트가 없는 브라우저(삼성 인터넷 등): 수동 경로 안내
+  if(isAndroid){
+    body.innerHTML = '<div class="notice">브라우저 <b>오른쪽 위 ⋮ 메뉴</b>를 누르고<br>' +
+      '<b>홈 화면에 추가</b>(또는 <b>앱 설치</b>)를 누르면 설치돼요.<br><br>' +
       '홈 화면에 생긴 시계 아이콘이 버스각 앱이에요!</div>';
     mainBtn.classList.add("hidden");
     modal.classList.remove("hidden");
