@@ -78,7 +78,11 @@ if(location.hostname === "busgak.github.io"){
   .btn:active{transform:scale(.97);}
   .muted{color:var(--sub); font-size:12px; line-height:1.6;}
   .stop-result{max-height:230px; overflow-y:auto; margin-top:10px; border:1px solid var(--line); border-radius:var(--radius-ctl); background:var(--bg);}
-  .stop-item{padding:12px 13px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px; transition:background .12s;}
+  .stop-item{padding:12px 13px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px; transition:background .12s;
+    display:flex; align-items:center; gap:8px;}
+  .stop-mapbtn{flex:0 0 auto; background:var(--card2); border:1px solid var(--line-strong); color:var(--text);
+    border-radius:9px; padding:8px 13px; font-size:13px; font-weight:600; cursor:pointer;}
+  .stop-mapbtn:active{transform:scale(.95);}
   .stop-item:last-child{border-bottom:none;}
   .stop-item:hover,.stop-item:active{background:var(--card2);}
   .stop-item .sid{color:var(--sub); font-size:12px;}
@@ -368,7 +372,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v52";
+const APP_VERSION = "v53";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -704,7 +708,8 @@ function ggStopItems(list){
     id: String(it.stationId),
     nm: String(it.stationName||"") + (it.regionName ? " ("+it.regionName+")" : ""),
     shortId: String(it.mobileNo||"").trim(),
-    admin: ""
+    admin: "",
+    lat: Number(it.y) || null, lng: Number(it.x) || null
   }));
 }
 function seoulStopItems(items){
@@ -712,7 +717,8 @@ function seoulStopItems(items){
     id: String(it.arsId),
     nm: String(it.stNm||""),
     shortId: String(it.arsId),
-    admin: ""
+    admin: "",
+    lat: Number(it.tmY) || null, lng: Number(it.tmX) || null
   }));
 }
 
@@ -725,7 +731,8 @@ function stopItemsFromList(list){
     const no = it.nodeno==null ? "" : String(it.nodeno);
     const nm = String(it.nodenm||"");
     const key = no ? no+"|"+nm : String(it.nodeid);
-    if(!by.has(key)) by.set(key, {id:String(it.nodeid), ids:[String(it.nodeid)], nm, shortId:no, admin:""});
+    if(!by.has(key)) by.set(key, {id:String(it.nodeid), ids:[String(it.nodeid)], nm, shortId:no, admin:"",
+      lat: Number(it.gpslati) || null, lng: Number(it.gpslong) || null});
     else by.get(key).ids.push(String(it.nodeid));
   }
   return [...by.values()];
@@ -735,9 +742,16 @@ function renderStopItems(box, stops, note, pickerName){
   let html = '<div class="stop-result">';
   for(const s of stops.slice(0,40)){
     const safeNm = (s.nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
-    html += `<div class="stop-item" onclick="${fn}('${(s.ids||[s.id]).join("|")}','${safeNm}','${s.shortId}')">
-      <div><b>${s.nm||"(이름 없음)"}</b>${s.dist!=null?` <span class="sid">${s.dist}m</span>`:""}</div>
-      <div class="sid">정류소번호 ${s.shortId||"-"} · ID ${s.id}</div></div>`;
+    const idsJoined = (s.ids||[s.id]).join("|");
+    const hasCoord = s.lat != null && !isNaN(s.lat) && s.lat !== 0;
+    const mapBtn = hasCoord
+      ? `<button class="stop-mapbtn" onclick="event.stopPropagation();showStopOnMap('${fn}','${idsJoined}','${safeNm}','${s.shortId}',${s.lat},${s.lng})">지도</button>`
+      : "";
+    html += `<div class="stop-item" onclick="${fn}('${idsJoined}','${safeNm}','${s.shortId}')">
+      <div style="flex:1; min-width:0">
+        <div><b>${s.nm||"(이름 없음)"}</b>${s.dist!=null?` <span class="sid">${s.dist}m</span>`:""}</div>
+        <div class="sid">정류소번호 ${s.shortId||"-"} · ID ${s.id}</div>
+      </div>${mapBtn}</div>`;
   }
   html += "</div><div class='muted' style='margin-top:6px'>" + (note||"") + "</div>";
   box.innerHTML = html;
@@ -832,18 +846,43 @@ async function loadLeaflet(){
   })();
   return leafletReady;
 }
+function ensureMap(){
+  if(mapObj) return;
+  mapObj = L.map("map-canvas").setView([37.4563, 126.7052], 16);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(mapObj);
+  mapObj.on("moveend", ()=>{ clearTimeout(mapFetchTimer); mapFetchTimer = setTimeout(refreshMapStops, 350); });
+}
 async function openMapPicker(){
   document.getElementById("map-modal").classList.remove("hidden");
   try{ await loadLeaflet(); }catch(e){ alert(e.message); closeMapPicker(); return; }
-  if(!mapObj){
-    mapObj = L.map("map-canvas").setView([37.4563, 126.7052], 16);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(mapObj);
-    mapObj.on("moveend", ()=>{ clearTimeout(mapFetchTimer); mapFetchTimer = setTimeout(refreshMapStops, 350); });
-  }
+  ensureMap();
+  clearMapHighlight();
   setTimeout(()=>mapObj.invalidateSize(), 60);
   mapToMyLoc(true); // 열자마자 내 위치 시도 (거부돼도 기본 위치에서 사용 가능)
 }
-function closeMapPicker(){ document.getElementById("map-modal").classList.add("hidden"); }
+function closeMapPicker(){ clearMapHighlight(); document.getElementById("map-modal").classList.add("hidden"); }
+/* 검색 결과의 정류장 위치를 지도에서 확인하고 그 자리에서 선택 */
+let mapHighlight = null;
+function clearMapHighlight(){ if(mapHighlight && mapObj){ try{ mapObj.removeLayer(mapHighlight); }catch(e){} mapHighlight = null; } }
+async function showStopOnMap(fn, ids, nm, no, lat, lng){
+  document.getElementById("map-modal").classList.remove("hidden");
+  try{ await loadLeaflet(); }catch(e){ alert(e.message); closeMapPicker(); return; }
+  ensureMap();
+  clearMapHighlight();
+  setTimeout(()=>mapObj.invalidateSize(), 60);
+  mapObj.setView([lat, lng], 17);
+  mapStatus("빨간 점이 \"" + nm + "\" 위치예요. 맞으면 점을 눌러 [이 정류장 선택]을 누르세요.");
+  const safeNm = String(nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
+  mapHighlight = L.circleMarker([lat, lng], {radius:12, color:"#b91c1c", weight:3, fillColor:"#ef4444", fillOpacity:.9}).addTo(mapObj);
+  mapHighlight.bindPopup(`<b>${nm||""}</b><br>정류소번호 ${no||"-"}<br>` +
+    `<button style="margin-top:6px;padding:7px 12px;border-radius:8px;border:none;background:#b91c1c;color:#fff;font-weight:700;cursor:pointer" ` +
+    `onclick="pickFromSearchMap('${fn}','${ids}','${safeNm}','${no}')">이 정류장 선택</button>`).openPopup();
+}
+async function pickFromSearchMap(fn, ids, nm, no){
+  closeMapPicker();
+  if(fn === "pickNearbyStop") await pickNearbyStop(ids, nm, no);
+  else pickStop(ids, nm, no);
+}
 async function mapToMyLoc(silent){
   try{
     const c = await geoPos();
@@ -872,8 +911,8 @@ async function refreshMapStops(){
   if(seq !== mapFetchSeq) return; // 더 최신 요청이 있으면 이 결과는 버림
   for(const m of mapMarkers) mapObj.removeLayer(m);
   mapMarkers = [];
-  if(!stops.length){ mapStatus("이 위치 주변 500m 안에 정류장이 없어요. 지도를 움직여 보세요."); return; }
-  mapStatus("정류장 " + stops.length + "곳 표시됨. 파란 점을 누른 뒤 [이 정류장 선택]을 누르세요.");
+  if(!stops.length){ if(!mapHighlight) mapStatus("이 위치 주변 500m 안에 정류장이 없어요. 지도를 움직여 보세요."); return; }
+  if(!mapHighlight) mapStatus("정류장 " + stops.length + "곳 표시됨. 파란 점을 누른 뒤 [이 정류장 선택]을 누르세요.");
   for(const s of stops){
     if(s.lat == null || isNaN(s.lat)) continue;
     const mk = L.circleMarker([s.lat, s.lng], {radius:9, color:"#1d4ed8", weight:2, fillColor:"#3b82f6", fillOpacity:.85}).addTo(mapObj);
