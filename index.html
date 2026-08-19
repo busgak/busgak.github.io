@@ -46,6 +46,12 @@ if(location.hostname === "busgak.github.io"){
   }
   .apphead{display:flex; align-items:center; gap:10px; margin-bottom:16px;}
   .headbtns{margin-left:auto; display:flex; gap:8px;}
+  .toast{position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:60;
+    background:var(--card); color:var(--text); border:1px solid var(--line-strong);
+    border-radius:999px; padding:9px 17px; font-size:13.5px; font-weight:600; white-space:nowrap;
+    opacity:0; transition:opacity .4s ease; pointer-events:none;
+    box-shadow:0 6px 20px rgba(0,0,0,.28);}
+  .toast.show{opacity:1;}
   .iconbtn{background:var(--card); border:1px solid var(--line); border-radius:11px;
     width:42px; height:42px; display:inline-flex; align-items:center; justify-content:center;
     color:var(--text); cursor:pointer; transition:transform .12s, color .15s, border-color .15s;}
@@ -393,7 +399,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v59";
+const APP_VERSION = "v60";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1488,12 +1494,24 @@ function toggleVoice(){
   voiceOn = !voiceOn;
   store.set("busAlarmVoiceGlobal", voiceOn ? "1" : "0");
   updateVoiceIcon();
+  showToast(voiceOn ? "음성 안내 켰어요" : "음성 안내 껐어요");
   if(voiceOn) speak("음성 안내를 켰어요."); // 사용자 터치 시점이라 iOS 음성 잠금도 함께 풀림
   else { try{ if(!isIOS) speechSynthesis.cancel(); }catch(e){} beep(1); }
 }
 function updateVoiceIcon(){
   const b = document.getElementById("voice-toggle");
   if(b) b.classList.toggle("off", !voiceOn);
+}
+/* 토글 피드백 토스트: 1초 표시 후 서서히 사라짐 */
+let toastEl = null, toastTimer = null;
+function showToast(msg){
+  if(!toastEl){ toastEl = document.createElement("div"); toastEl.className = "toast"; document.body.appendChild(toastEl); }
+  toastEl.textContent = msg;
+  clearTimeout(toastTimer);
+  toastEl.classList.remove("show");
+  void toastEl.offsetWidth; // 연속 클릭 시 애니메이션 재시작
+  toastEl.classList.add("show");
+  toastTimer = setTimeout(()=>toastEl.classList.remove("show"), 1000);
 }
 /* 앱 내 알람(배너·소리·음성 알림) 전역 토글 - 화면을 직접 보는 중엔 알람이 필요 없는 사용자용.
    화면 카운트다운과 "앱 꺼져 있을 때" 서버 푸시 설정에는 영향 없음 */
@@ -1507,6 +1525,7 @@ function toggleAlarm(){
   alarmOn = !alarmOn;
   store.set("busgakAlarmOn", alarmOn ? "1" : "0");
   updateAlarmIcon();
+  showToast(alarmOn ? "배너·소리 알람 켰어요" : "배너·소리 알람 껐어요 (음성은 그대로)");
   if(alarmOn) beep(1); // 켤 때만 짧은 확인음
 }
 function updateAlarmIcon(){
