@@ -372,7 +372,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v54";
+const APP_VERSION = "v55";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1186,8 +1186,8 @@ function render(){
     const urg = dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good";
     // 어르신 모드: 초 단위 없이 분으로만 크게 (읽기 부담 최소화)
     const label = elderMode
-      ? (dep <= 40 ? `<em>지금 나가세요!</em>` : `<em>${Math.max(1, Math.round(dep/60))}분</em> 뒤에 나가요`)
-      : (dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가요`);
+      ? (dep <= 40 ? `<em>지금 나가세요!</em>` : `<em>${Math.max(1, Math.round(dep/60))}분</em> 뒤에 나가세요`)
+      : (dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가세요`);
     html += `
     <div class="depart-card ${urg} ${rank===1?"best":""}">
       <div class="dc-head">
