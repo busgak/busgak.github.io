@@ -372,7 +372,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v53";
+const APP_VERSION = "v54";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -776,9 +776,30 @@ function nearbyItems(list, la, lo){
   stops.sort((x,y)=>((x.dist==null?1e9:x.dist)-(y.dist==null?1e9:y.dist)));
   return stops;
 }
+function inSeoulArea(la, lo){ return la >= 37.40 && la <= 37.72 && lo >= 126.75 && lo <= 127.21; }
 async function fetchNearby(la, lo){
-  const list = await tagoCall("BusSttnInfoInqireService", "getCrdntPrxmtSttnList", {gpsLati: la.toFixed(6), gpsLong: lo.toFixed(6)});
-  return nearbyItems(list, la, lo);
+  const jobs = [
+    tagoCall("BusSttnInfoInqireService", "getCrdntPrxmtSttnList", {gpsLati: la.toFixed(6), gpsLong: lo.toFixed(6)})
+      .then(list => nearbyItems(list, la, lo))
+  ];
+  // 서울 시내버스 정류장은 TAGO 좌표검색에 안 나와서 서울 API(getStationByPos)를 병행 조회해 합침
+  if(inSeoulArea(la, lo)){
+    jobs.push(seoulCall("stationinfo/getStationByPos", {tmX: lo.toFixed(6), tmY: la.toFixed(6), radius: 500})
+      .then(items => (items||[]).filter(it => it && it.arsId && String(it.arsId) !== "0").map(it => ({
+        id: String(it.arsId), ids: [String(it.arsId)], nm: String(it.stationNm||""), shortId: String(it.arsId),
+        admin: "", lat: Number(it.gpsY)||null, lng: Number(it.gpsX)||null,
+        dist: it.dist != null ? Math.round(Number(it.dist)) : null
+      }))));
+  }
+  const results = await Promise.allSettled(jobs);
+  if(results.every(r => r.status === "rejected")) throw results[0].reason;
+  const tago = results[0].status === "fulfilled" ? results[0].value : [];
+  const seoul = results[1] && results[1].status === "fulfilled" ? results[1].value : [];
+  // 같은 정류소번호는 서울 정식 데이터 우선 (TAGO 쪽 가상 정류장 중복 제거)
+  const seoulNos = new Set(seoul.map(s => String(s.shortId)));
+  const merged = [...seoul, ...tago.filter(t => !seoulNos.has(String(t.shortId)))];
+  merged.sort((x,y)=>((x.dist==null?1e9:x.dist)-(y.dist==null?1e9:y.dist)));
+  return merged;
 }
 function geoPos(){
   return new Promise((res, rej)=>{
@@ -807,7 +828,25 @@ async function findNearby(){
     renderStopItems(box, stops, "가까운 순이에요. 정류소번호(표지판 숫자)로 타는 방향을 확인하고 선택하세요.", "pickNearbyStop");
   }catch(e){ box.innerHTML = '<div class="err">' + e.message + '</div>'; }
 }
+function switchCityTo(code, name){
+  config.cityCode = code; config.cityName = name;
+  const sel = document.getElementById("in-city");
+  if(sel){
+    sel.value = code;
+    if(sel.value !== code){ // 목록에 아직 없으면 옵션 추가 후 선택
+      const o = document.createElement("option"); o.value = code; o.textContent = name;
+      sel.appendChild(o); sel.value = code;
+    }
+  }
+}
 async function pickNearbyStop(id, name, shortId){
+  const ids = String(id).split("|").filter(Boolean);
+  // 서울 정류장(병행 조회 결과, arsId 5자리): 지역을 서울로 자동 전환하고 바로 선택
+  if(ids.length === 1 && /^\d{5}$/.test(ids[0]) && ids[0] === String(shortId)){
+    if(provider() !== "seoul") switchCityTo("S1", "서울특별시");
+    pickStop(ids[0], name, shortId);
+    return;
+  }
   if(provider()==="tago"){ pickStop(id, name, shortId); return; }
   // 서울·경기 프로필: TAGO 정류장을 정류소번호로 해당 지역 API에 매핑해서 선택
   try{
