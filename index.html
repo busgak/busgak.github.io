@@ -45,6 +45,14 @@ if(location.hostname === "busgak.github.io"){
     font-feature-settings:"tnum";
   }
   .apphead{display:flex; align-items:center; gap:10px; margin-bottom:16px;}
+  .iconbtn{margin-left:auto; background:var(--card); border:1px solid var(--line); border-radius:11px;
+    width:42px; height:42px; display:inline-flex; align-items:center; justify-content:center;
+    color:var(--text); cursor:pointer; transition:transform .12s, color .15s, border-color .15s;}
+  .iconbtn:active{transform:scale(.94);}
+  .iconbtn .voice-slash{display:none;}
+  .iconbtn.off{color:var(--sub); border-color:var(--line);}
+  .iconbtn.off .voice-wave{display:none;}
+  .iconbtn.off .voice-slash{display:block;}
   .applogo{width:34px; height:34px; border-radius:9px; flex:0 0 auto;}
   h1{font-size:20px; font-weight:800; letter-spacing:-.02em; line-height:1.15;}
   .subtitle{color:var(--sub); font-size:12.5px; margin-top:1px;}
@@ -150,6 +158,14 @@ if(location.hostname === "busgak.github.io"){
     <h1>버스각</h1>
     <div class="subtitle">지금 나가면 탈 수 있는 버스를 알려줘요</div>
   </div>
+  <button id="voice-toggle" class="iconbtn" onclick="toggleVoice()" aria-label="음성 안내 켜기/끄기" title="음성 안내 켜기/끄기">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"></path>
+      <path class="voice-wave" d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+      <path class="voice-wave" d="M18.4 6a9 9 0 0 1 0 12"></path>
+      <line class="voice-slash" x1="4" y1="4" x2="20" y2="20"></line>
+    </svg>
+  </button>
 </header>
 
 <!-- ================= HOME ================= -->
@@ -209,6 +225,10 @@ if(location.hostname === "busgak.github.io"){
       <input type="text" id="in-stopname" placeholder="예: 부평역 또는 37121" onkeydown="if(event.key==='Enter')searchStop()">
       <button class="btn small secondary" style="flex:0 0 auto" onclick="searchStop()">검색</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn small secondary" type="button" onclick="findNearby()">내 주변 정류장</button>
+      <button class="btn small secondary" type="button" onclick="openMapPicker()">지도에서 고르기</button>
+    </div>
     <div id="stop-results"></div>
     <div id="sel-stop" class="notice hidden"></div>
   </div>
@@ -237,11 +257,8 @@ if(location.hostname === "busgak.github.io"){
     <label style="margin-top:12px">작동 요일</label>
     <div id="daychips"></div>
     <div class="voicerow" style="margin-top:14px">
-      <label class="switch" style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
-        <input type="checkbox" id="in-voice" checked style="width:18px; height:18px; accent-color:var(--btn-bg);">
-        음성으로도 알려주기
-      </label>
-      <button class="btn small secondary" type="button" onclick="testVoice()">알림 테스트</button>
+      <span class="muted">음성 안내는 홈 화면 오른쪽 위 스피커 버튼으로 켜고 꺼요 (모든 프로필 공통)</span>
+      <button class="btn small secondary" type="button" style="flex:0 0 auto" onclick="testVoice()">알림 테스트</button>
     </div>
     <div style="margin-top:12px">
       <label class="switch" style="margin:0; display:flex; align-items:center; gap:8px; color:var(--text); font-size:14px;">
@@ -258,6 +275,21 @@ if(location.hostname === "busgak.github.io"){
   <div class="muted" style="margin-top:10px">
     저장하면 이 브라우저에 기억돼요. 시크릿 모드 등 저장이 안 되는 환경에서는 위의 「설정 링크」를
     즐겨찾기 해두면 다음에 열 때 설정이 그대로 복원돼요.
+  </div>
+</div>
+
+<!-- ================= 지도 정류장 선택 모달 ================= -->
+<div id="map-modal" class="modal-overlay hidden">
+  <div class="modal-sheet" style="padding:14px 14px calc(14px + env(safe-area-inset-bottom));">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+      <h2 style="font-size:16px; color:var(--text);">지도에서 정류장 고르기</h2>
+      <div style="display:flex; gap:6px;">
+        <button class="btn small secondary" type="button" onclick="mapToMyLoc()">내 위치</button>
+        <button class="btn small secondary" type="button" onclick="closeMapPicker()">닫기</button>
+      </div>
+    </div>
+    <div id="map-canvas" style="height:58vh; border-radius:12px; overflow:hidden; background:var(--card2);"></div>
+    <div class="muted" style="margin-top:8px">지도를 움직이면 주변 정류장이 파란 점으로 표시돼요. 점을 누른 뒤 [이 정류장 선택]을 누르세요.</div>
   </div>
 </div>
 
@@ -289,7 +321,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v46";
+const APP_VERSION = "v47";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -647,16 +679,127 @@ function stopItemsFromList(list){
   }
   return [...by.values()];
 }
-function renderStopItems(box, stops, note){
+function renderStopItems(box, stops, note, pickerName){
+  const fn = pickerName || "pickStop";
   let html = '<div class="stop-result">';
   for(const s of stops.slice(0,40)){
     const safeNm = (s.nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
-    html += `<div class="stop-item" onclick="pickStop('${(s.ids||[s.id]).join("|")}','${safeNm}','${s.shortId}')">
-      <div><b>${s.nm||"(이름 없음)"}</b></div>
+    html += `<div class="stop-item" onclick="${fn}('${(s.ids||[s.id]).join("|")}','${safeNm}','${s.shortId}')">
+      <div><b>${s.nm||"(이름 없음)"}</b>${s.dist!=null?` <span class="sid">${s.dist}m</span>`:""}</div>
       <div class="sid">정류소번호 ${s.shortId||"-"} · ID ${s.id}</div></div>`;
   }
   html += "</div><div class='muted' style='margin-top:6px'>" + (note||"") + "</div>";
   box.innerHTML = html;
+}
+/* ---------- 위치·지도 기반 정류장 찾기 (TAGO 좌표 근접 정류소) ---------- */
+function haversineM(la1, lo1, la2, lo2){
+  const R = 6371000, rad = x => x*Math.PI/180;
+  const dLa = rad(la2-la1), dLo = rad(lo2-lo1);
+  const h = Math.sin(dLa/2)**2 + Math.cos(rad(la1))*Math.cos(rad(la2))*Math.sin(dLo/2)**2;
+  return Math.round(2*R*Math.asin(Math.sqrt(h)));
+}
+function nearbyItems(list, la, lo){
+  const stops = stopItemsFromList(list);
+  const coord = new Map();
+  for(const it of (list||[])){
+    if(it && it.nodeid && !coord.has(String(it.nodeid))) coord.set(String(it.nodeid), [Number(it.gpslati), Number(it.gpslong)]);
+  }
+  for(const s of stops){
+    const c = coord.get(s.id);
+    if(c && !isNaN(c[0])){ s.lat = c[0]; s.lng = c[1]; if(la != null) s.dist = haversineM(la, lo, c[0], c[1]); }
+  }
+  stops.sort((x,y)=>((x.dist==null?1e9:x.dist)-(y.dist==null?1e9:y.dist)));
+  return stops;
+}
+async function fetchNearby(la, lo){
+  const list = await tagoCall("BusSttnInfoInqireService", "getCrdntPrxmtSttnList", {gpsLati: la.toFixed(6), gpsLong: lo.toFixed(6)});
+  return nearbyItems(list, la, lo);
+}
+function geoPos(){
+  return new Promise((res, rej)=>{
+    if(!navigator.geolocation) return rej(new Error("이 기기는 위치 정보를 지원하지 않아요."));
+    navigator.geolocation.getCurrentPosition(
+      p => res(p.coords),
+      () => rej(new Error("위치 권한이 필요해요. 브라우저 설정에서 이 사이트의 위치 접근을 허용해 주세요.")),
+      {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
+  });
+}
+async function findNearby(){
+  const box = document.getElementById("stop-results");
+  box.innerHTML = '<div class="notice">내 위치로 주변 정류장을 찾는 중…</div>';
+  try{
+    const c = await geoPos();
+    const stops = await fetchNearby(c.latitude, c.longitude);
+    if(!stops.length){ box.innerHTML = '<div class="err">주변에서 정류장을 찾지 못했어요. 이름이나 정류소번호로 검색해 주세요.</div>'; return; }
+    renderStopItems(box, stops, "가까운 순이에요. 정류소번호(표지판 숫자)로 타는 방향을 확인하고 선택하세요.", "pickNearbyStop");
+  }catch(e){ box.innerHTML = '<div class="err">' + e.message + '</div>'; }
+}
+async function pickNearbyStop(id, name, shortId){
+  if(provider()==="tago"){ pickStop(id, name, shortId); return; }
+  // 서울·경기 프로필: TAGO 정류장을 정류소번호로 해당 지역 API에 매핑해서 선택
+  try{
+    const stops = await searchStopByNumber(String(shortId||"").replace(/\D/g,""));
+    if(stops && stops.length){ pickStop((stops[0].ids||[stops[0].id]).join("|"), stops[0].nm, stops[0].shortId); return; }
+  }catch(e){}
+  alert("이 지역 노선정보에서 정류소번호 " + shortId + "를 찾지 못했어요. 이름으로 검색해 주세요.");
+}
+/* 지도 모달 (Leaflet - 처음 열 때만 로드) */
+let leafletReady = null, mapObj = null, mapMarkers = [], mapFetchTimer = null;
+function loadLeaflet(){
+  if(leafletReady) return leafletReady;
+  leafletReady = new Promise((res, rej)=>{
+    const css = document.createElement("link"); css.rel = "stylesheet";
+    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = () => res();
+    js.onerror = () => { leafletReady = null; rej(new Error("지도를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.")); };
+    document.head.appendChild(js);
+  });
+  return leafletReady;
+}
+async function openMapPicker(){
+  document.getElementById("map-modal").classList.remove("hidden");
+  try{ await loadLeaflet(); }catch(e){ alert(e.message); closeMapPicker(); return; }
+  if(!mapObj){
+    mapObj = L.map("map-canvas").setView([37.4563, 126.7052], 16);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(mapObj);
+    mapObj.on("moveend", ()=>{ clearTimeout(mapFetchTimer); mapFetchTimer = setTimeout(refreshMapStops, 350); });
+  }
+  setTimeout(()=>mapObj.invalidateSize(), 60);
+  mapToMyLoc(true); // 열자마자 내 위치 시도 (거부돼도 기본 위치에서 사용 가능)
+}
+function closeMapPicker(){ document.getElementById("map-modal").classList.add("hidden"); }
+async function mapToMyLoc(silent){
+  try{
+    const c = await geoPos();
+    mapObj.setView([c.latitude, c.longitude], 17);
+  }catch(e){
+    if(silent !== true) alert(e.message);
+    refreshMapStops();
+  }
+}
+async function refreshMapStops(){
+  if(!mapObj || mapObj.getZoom() < 15) return;
+  const c = mapObj.getCenter();
+  let stops = [];
+  try{ stops = await fetchNearby(c.lat, c.lng); }catch(e){ return; }
+  for(const m of mapMarkers) mapObj.removeLayer(m);
+  mapMarkers = [];
+  for(const s of stops){
+    if(s.lat == null || isNaN(s.lat)) continue;
+    const mk = L.circleMarker([s.lat, s.lng], {radius:9, color:"#1d4ed8", weight:2, fillColor:"#3b82f6", fillOpacity:.85}).addTo(mapObj);
+    const safeNm = (s.nm||"").replace(/\\/g,"").replace(/'/g,"\\'").replace(/"/g,"");
+    mk.bindPopup(`<b>${s.nm||""}</b><br>정류소번호 ${s.shortId||"-"}<br>` +
+      `<button style="margin-top:6px;padding:6px 10px;border-radius:8px;border:none;background:#1d4ed8;color:#fff;font-weight:700;cursor:pointer" ` +
+      `onclick="pickFromMap('${(s.ids||[s.id]).join("|")}','${safeNm}','${s.shortId}')">이 정류장 선택</button>`);
+    mapMarkers.push(mk);
+  }
+}
+async function pickFromMap(id, nm, no){
+  closeMapPicker();
+  await pickNearbyStop(id, nm, no);
 }
 // 정류소번호(표지판 숫자)로 검색
 async function searchStopByNumber(num){
@@ -876,12 +1019,12 @@ function render(){
     const depTime = new Date(now.getTime() + dep*1000);
     const arrTime = new Date(now.getTime() + arr*1000);
     const urg = dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good";
-    const label = dep <= 10 ? `<em>지금 출발!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤 출발`;
+    const label = dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가요`;
     html += `
     <div class="depart-card ${urg} ${rank===1?"best":""}">
       <div class="dc-head">
         <span class="busno">${o.busNo}</span>
-        <span class="dc-clock">${fmtHM(depTime)} 출발</span>
+        <span class="dc-clock">${fmtHM(depTime)} 나가기</span>
       </div>
       <div class="depart-main">${label}</div>
       <div class="depart-sub">
@@ -979,7 +1122,7 @@ document.addEventListener("pointerdown", unlockAudio);
 setTimeout(()=>{
   probeSpeech();
   setTimeout(()=>{
-    if(!speechUnlocked && config.voice !== false && ("speechSynthesis" in window)){
+    if(!speechUnlocked && voiceOn && ("speechSynthesis" in window)){
       const hint = document.getElementById("voice-unlock-hint");
       if(hint) hint.classList.remove("hidden");
     }
@@ -1112,8 +1255,26 @@ function speakOnce(text, useVoice, label){
   return () => started;
 }
 let pendingSpeech = null; // 터치 전에 온 음성을 보류했다가 첫 터치에 재생
+/* 음성 안내는 프로필과 무관한 전역 설정 (홈 오른쪽 위 스피커 버튼) */
+let voiceOn = true;
+function initVoicePref(){
+  const saved = store.get("busAlarmVoiceGlobal");
+  voiceOn = saved !== null ? saved === "1" : (config.voice !== false); // 기존 프로필 설정에서 1회 이관
+  updateVoiceIcon();
+}
+function toggleVoice(){
+  voiceOn = !voiceOn;
+  store.set("busAlarmVoiceGlobal", voiceOn ? "1" : "0");
+  updateVoiceIcon();
+  if(voiceOn) speak("음성 안내를 켰어요."); // 사용자 터치 시점이라 iOS 음성 잠금도 함께 풀림
+  else { try{ if(!isIOS) speechSynthesis.cancel(); }catch(e){} beep(1); }
+}
+function updateVoiceIcon(){
+  const b = document.getElementById("voice-toggle");
+  if(b) b.classList.toggle("off", !voiceOn);
+}
 function speak(text){
-  if(config.voice===false){ logEvt("음성 꺼짐 상태"); return; }
+  if(!voiceOn){ logEvt("음성 꺼짐 상태"); return; }
   try{
     if(!("speechSynthesis" in window)){ logEvt("음성 미지원 기기"); return; }
     if(isIOS && !speechUnlocked){
@@ -1144,9 +1305,8 @@ function speak(text){
   }catch(e){ logEvt("음성 예외2"); }
 }
 function testVoice(){
-  config.voice = document.getElementById("in-voice").checked;
   // 실제 알람과 동일한 전체 경로 테스트: 배너 + 소리 + (켜져 있으면) 음성
-  notify("곧 출발 · 테스트", "알림이 이렇게 와요", 3, "테스트입니다. 223번 버스, 3분 뒤 출발입니다.");
+  notify("곧 나가기 · 테스트", "알림이 이렇게 와요", 3, "테스트입니다. 223번 버스, 3분 뒤에 나가세요.");
 }
 function notify(title, body, soundTimes, speech){
   beep(soundTimes||2);
@@ -1171,6 +1331,30 @@ function notify(title, body, soundTimes, speech){
 const lastAlarmAt = new Map();  // "버스번호|단계" -> epoch ms (사라짐 안내 중복 방지)
 const seenSoon = new Map();     // "곧 출발" 구간에 들어왔던 버스 (사라짐 감지용)
 const lastMinByBus = new Map(); // 버스번호 -> 마지막으로 안내한 남은 분 (카운트다운)
+const lastEstAbs = new Map();   // 버스번호 -> 마지막 예측 도착 절대시각 ms (오차 학습용)
+const depAbsMap = new Map();    // 버스번호 -> 마지막 예측 출발 절대시각 ms (급변 감지용)
+
+/* ---------- 온디바이스 예측 오차 학습 ----------
+   버스가 도착 목록에서 사라진 시점(실제 통과)과 마지막 예측 도착시각의 차이를
+   정류장+노선별 EMA로 누적. 양수 = 예측보다 일찍 지나가는 경향 → 그만큼 알람을 더 앞당김 */
+function predErrKey(){ return "busgakPredErr|" + (config.cityCode||"") + "|" + (config.stopId||""); }
+function loadPredErr(){ try{ return JSON.parse(store.get(predErrKey())||"{}"); }catch(e){ return {}; } }
+function learnPredErr(nb, errSec){
+  if(!isFinite(errSec) || Math.abs(errSec) > 120) return; // ±2분 밖은 API 글리치로 보고 제외
+  const all = loadPredErr();
+  const cur = all[nb] || {ema:0, n:0};
+  cur.ema = cur.n === 0 ? Math.round(errSec) : Math.round((0.7*cur.ema + 0.3*errSec)*10)/10;
+  cur.n = Math.min(cur.n+1, 99);
+  all[nb] = cur;
+  store.set(predErrKey(), JSON.stringify(all));
+  logEvt("오차 학습: "+nb+" err="+Math.round(errSec)+"s → ema="+cur.ema+" (n="+cur.n+")");
+}
+function routeLead(nb){
+  const e = loadPredErr()[nb];
+  if(!e || e.n < 3) return 0; // 관측 3회부터 반영
+  return Math.max(0, Math.min(120, Math.round(e.ema))); // 일찍 지나가는 경향만큼 추가 (최대 2분)
+}
+
 function checkAlarms(){
   if(!lastFetchAt) return;
   const now = new Date();
@@ -1178,11 +1362,35 @@ function checkAlarms(){
   // 앱이 켜져 있는 동안에는 시간대와 무관하게 항상 알림 (시간대·요일은 앱이 꺼졌을 때의 푸시에만 적용)
   const elapsed = (now-lastFetchAt)/1000;
   // 1분 카운트다운: 5분 30초 안에 들어오면 매분 안내 (5분 → 4분 → … → 1분 → 출발하세요)
-  // ALARM_LEAD: 예측이 낙관적으로 어긋나도 놓치지 않도록 알람만 앞당김 (화면 카운트다운은 원본 유지)
-  for(const o of cachedOpts){
-    const dep = o.departSec - elapsed - ALARM_LEAD;
-    if(dep > 330 || dep <= -60) continue;
+  // 알람 여유 = ALARM_LEAD(기본 40초) + 배차간격 비대칭(다음 대안이 멀수록 추가) + 노선별 학습 오차
+  const seenThisPoll = new Set();
+  for(let i = 0; i < cachedOpts.length; i++){
+    const o = cachedOpts[i];
     const nb = normBusNo(o.busNo);
+    if(seenThisPoll.has(nb)) continue; // 같은 노선 여러 대면 가장 가까운 차 기준
+    seenThisPoll.add(nb);
+    lastEstAbs.set(nb, lastFetchAt.getTime() + o.estSec*1000);
+    // 배차간격 비대칭 버퍼: 놓쳤을 때 비용(다음 대안까지 대기)에 비례해 여유 추가
+    const nxt = cachedOpts.slice(i+1).find(x => x.departSec > o.departSec + 60);
+    const gap = nxt ? nxt.departSec - o.departSec : null;
+    const gapLead = (gap == null || gap >= 900) ? 30 : gap >= 600 ? 15 : 0;
+    const dep = o.departSec - elapsed - ALARM_LEAD - gapLead - routeLead(nb);
+    // 예측 급변 경보: 출발 예정이 40초 넘게 갑자기 당겨지면 즉시 알림 (10분 내 버스만)
+    const depAbsNow = lastFetchAt.getTime() + o.departSec*1000;
+    const prevAbs = depAbsMap.get(nb);
+    depAbsMap.set(nb, depAbsNow);
+    if(prevAbs && prevAbs - depAbsNow > 40*1000 && dep <= 600 && dep > -60){
+      const sk = nb + "|shift";
+      if(nowMs - (lastAlarmAt.get(sk)||0) >= 3*60*1000){
+        lastAlarmAt.set(sk, nowMs);
+        const mm = Math.max(0, Math.round(dep/60));
+        logEvt("예측 급변: "+o.busNo+" "+Math.round((prevAbs-depAbsNow)/1000)+"초 당겨짐");
+        notify("예측 당겨짐 · "+o.busNo+"번",
+          mm<=0 ? "버스가 빨라졌어요. 지금 나가세요!" : "버스가 빨라졌어요. "+mm+"분 안에 나가세요!", 4,
+          busNoSpeech(o.busNo)+"번 버스가 빨라졌어요. "+(mm<=0 ? "지금 나가세요!" : mm+"분 안에 나가세요."));
+      }
+    }
+    if(dep > 330 || dep <= -60) continue;
     seenSoon.set(nb, nowMs);
     const m = Math.max(0, Math.round(dep/60));
     const has = lastMinByBus.has(nb);
@@ -1193,11 +1401,11 @@ function checkAlarms(){
     const depTime = fmtHM(new Date(nowMs + dep*1000));
     logEvt("알람: "+o.busNo+" "+m+"분");
     if(m >= 1){
-      notify("곧 출발 · "+o.busNo+"번", depTime+"에 나가세요 ("+m+"분 뒤)", 3,
-        busNoSpeech(o.busNo)+"번 버스, "+m+"분 뒤 출발입니다.");
+      notify("곧 나가기 · "+o.busNo+"번", depTime+"에 나가세요 ("+m+"분 뒤)", 3,
+        busNoSpeech(o.busNo)+"번 버스, "+m+"분 뒤에 나가세요.");
     }else{
-      notify("지금 출발 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
-        busNoSpeech(o.busNo)+"번 버스, 출발하세요!");
+      notify("지금 나가세요 · "+o.busNo+"번", "지금 나가야 탈 수 있어요!", 4,
+        busNoSpeech(o.busNo)+"번 버스, 지금 나가세요!");
     }
   }
   // "곧 출발" 구간에 있던 버스가 예고 없이 사라지면(예측 급변 등) 출발 안내를 대신 보냄
@@ -1207,6 +1415,10 @@ function checkAlarms(){
     if(present.has(bus)) continue;
     seenSoon.delete(bus);
     lastMinByBus.delete(bus); // 같은 번호의 다음 버스가 새로 카운트다운하도록
+    // 온디바이스 학습: 예측 도착시각 대비 실제 통과(사라짐) 시점의 오차 기록
+    const est = lastEstAbs.get(bus);
+    if(est){ learnPredErr(bus, (est - nowMs)/1000); lastEstAbs.delete(bus); }
+    depAbsMap.delete(bus);
     const k = bus + "|now";
     if(nowMs - (lastAlarmAt.get(k)||0) >= 4*60*1000){
       lastAlarmAt.set(k, nowMs);
@@ -1214,10 +1426,10 @@ function checkAlarms(){
       // 다음 대안까지 함께 안내 (출근자 관점: "그럼 이제 뭘 타지?"에 바로 답)
       const next = cachedOpts[0];
       const nextDep = next ? Math.max(1, Math.round((next.departSec - elapsed)/60)) : null;
-      const nextTxt = next ? " 다음은 "+next.busNo+"번, "+nextDep+"분 뒤 출발" : "";
-      notify("출발함 · "+bus+"번", "방금 출발했어요." + (next ? nextTxt : " 다음 버스를 확인하세요"), 3,
-        busNoSpeech(bus)+"번 버스가 방금 출발했어요." +
-        (next ? " 다음은 "+busNoSpeech(next.busNo)+"번 버스, "+nextDep+"분 뒤 출발입니다." : " 다음 버스를 확인해 주세요."));
+      const nextTxt = next ? " 다음은 "+next.busNo+"번, "+nextDep+"분 뒤에 나가면 돼요" : "";
+      notify("버스 지나감 · "+bus+"번", "버스가 방금 지나갔어요." + (next ? nextTxt : " 다음 버스를 확인하세요"), 3,
+        busNoSpeech(bus)+"번 버스가 방금 지나갔어요." +
+        (next ? " 다음은 "+busNoSpeech(next.busNo)+"번 버스, "+nextDep+"분 뒤에 나가면 돼요." : " 다음 버스를 확인해 주세요."));
     }
   }
 }
@@ -1487,7 +1699,6 @@ function cityChanged(){
 
 function fillForm(){
   loadCityList();
-  document.getElementById("in-voice").checked = config.voice !== false;
   const pushBox = document.getElementById("in-push");
   const pushSt = document.getElementById("push-status");
   if(!pushSupported()){
@@ -1525,7 +1736,6 @@ function saveSettings(){
   config.walkMin = Math.max(0, parseInt(document.getElementById("in-walk").value||"0",10));
   config.start = document.getElementById("in-start").value || "06:30";
   config.end = document.getElementById("in-end").value || "09:00";
-  config.voice = document.getElementById("in-voice").checked;
   persistConfig();
   quietPushSync(); // 푸시 켜져 있으면 서버 설정도 갱신
   if(!config.stopId || config.buses.length===0){
@@ -1729,6 +1939,7 @@ if(FEEDBACK_URL) document.getElementById("btn-feedback").classList.remove("hidde
 /* ---------- 초기화 ---------- */
 loadConfig();
 initProfiles();
+initVoicePref();
 renderProfileChips();
 fillForm();
 updateSetupHint();
