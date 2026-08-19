@@ -321,7 +321,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v48";
+const APP_VERSION = "v49";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -474,7 +474,11 @@ function looksLikeApiXml(t){
   return t && t.includes("<") && /OpenAPI_ServiceResponse|ServiceResult|resultCode|msgHeader|returnAuthMsg/i.test(t);
 }
 async function fetchText(url){
-  const modes = workingFetchMode ? [workingFetchMode, ...FETCH_MODES] : FETCH_MODES;
+  // 자체 워커 프록시(PUSH_SERVER)는 CORS가 열려 있으므로 항상 직접 연결만 사용.
+  // 공개 CORS 프록시 폴백은 예전 직접호출 시절의 잔재 - 한 번 타면 세션 내내 느린 제3자 경유로 굳는 문제가 있었음.
+  const own = url.indexOf(PUSH_SERVER) === 0;
+  const modes = own ? ["direct"] : (workingFetchMode ? [workingFetchMode, ...FETCH_MODES] : FETCH_MODES);
+  const timeoutMs = own ? 20000 : 12000; // 공공API 콜드 응답이 12초를 넘는 경우 대비
   const tried = new Set();
   const fails = [];
   for(const mode of modes){
@@ -488,7 +492,7 @@ async function fetchText(url){
       // AbortSignal은 일부 환경(앱 내 미리보기 등)에서 오류를 일으켜 Promise.race로 시간제한 처리
       const res = await Promise.race([
         fetch(target, {cache:"no-store"}),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error("시간 초과")), 12000))
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error("시간 초과")), timeoutMs))
       ]);
       let text = "";
       try{ text = await res.text(); }catch(e){}
@@ -794,14 +798,17 @@ function mapStatus(msg){
   const el = document.getElementById("map-status");
   if(el) el.textContent = msg;
 }
+let mapFetchSeq = 0; // 동시 갱신 레이스 방지: 마지막 요청의 결과만 반영
 async function refreshMapStops(){
   if(!mapObj) return;
   if(mapObj.getZoom() < 15){ mapStatus("지도를 더 확대하면 정류장이 표시돼요."); return; }
+  const seq = ++mapFetchSeq;
   const c = mapObj.getCenter();
   mapStatus("주변 정류장 찾는 중…");
   let stops = [];
   try{ stops = await fetchNearby(c.lat, c.lng); }
-  catch(e){ mapStatus("정류장 조회 실패: " + e.message); return; }
+  catch(e){ if(seq === mapFetchSeq) mapStatus("정류장 조회 실패: " + e.message); return; }
+  if(seq !== mapFetchSeq) return; // 더 최신 요청이 있으면 이 결과는 버림
   for(const m of mapMarkers) mapObj.removeLayer(m);
   mapMarkers = [];
   if(!stops.length){ mapStatus("이 위치 주변 500m 안에 정류장이 없어요. 지도를 움직여 보세요."); return; }
