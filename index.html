@@ -414,7 +414,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v67";
+const APP_VERSION = "v68";
 const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1781,7 +1781,10 @@ function learnPredErr(nb, errSec){
 function routeLead(nb){
   const e = loadPredErr()[nb];
   if(!e || e.n < 3) return 0; // 관측 3회부터 반영
-  return Math.max(0, Math.min(120, Math.round(e.ema))); // 일찍 지나가는 경향만큼 추가 (최대 2분)
+  // 일찍 지나가는 경향(+): 그만큼 리드 추가 (최대 2분)
+  if(e.ema >= 0) return Math.min(120, Math.round(e.ema));
+  // 늦게 오는 경향(-): 5회 이상 확인됐을 때만 최대 30초 완화 (기본 40초가 있어 실효 여유 최소 10초는 유지)
+  return e.n >= 5 ? Math.max(-30, Math.round(e.ema)) : 0;
 }
 
 function checkAlarms(){
