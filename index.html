@@ -414,8 +414,8 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v68";
-const ALARM_LEAD = 40; // 알람 안전 여유(초): 화면 숫자는 그대로, 알람 판정만 이만큼 앞당김 (API 예측 낙관 오차 대비)
+const APP_VERSION = "v69";
+const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
 /* API 키는 서버(프록시)에만 보관됨 - 앱은 프록시를 통해서만 데이터를 요청 */
@@ -1806,7 +1806,8 @@ function checkAlarms(){
     const nxt = cachedOpts.slice(i+1).find(x => x.departSec > o.departSec + 60);
     const gap = nxt ? nxt.departSec - o.departSec : null;
     const gapLead = (gap == null || gap >= 900) ? 30 : gap >= 600 ? 15 : 0;
-    const dep = o.departSec - elapsed - ALARM_LEAD - gapLead - routeLead(nb);
+    const depReal = o.departSec - elapsed;                              // 화면 카운트다운과 동일한 값 (안내 문구용)
+    const dep = depReal - ALARM_LEAD - gapLead - routeLead(nb);          // 알람이 울릴 시점 판정용
     if(dep > 330 || dep <= -60) continue;
     seenSoon.set(nb, nowMs);
     const m = Math.max(0, Math.round(dep/60));
@@ -1817,12 +1818,14 @@ function checkAlarms(){
     // 급변(2분 이상 당겨짐)은 별도 알람 대신 이번 카운트다운 안내에 맥락만 얹는다 (알람 횟수 동일)
     const jumped = has && m <= prev - 2;
     lastMinByBus.set(nb, m);
-    const depTime = fmtHM(new Date(nowMs + dep*1000));
-    logEvt("알람: "+o.busNo+" "+m+"분"+(jumped?" (급변)":""));
-    if(m >= 1){
+    // 말하는 숫자·시각은 항상 화면과 같게 (보정이 붙어도 사용자가 보는 값과 어긋나지 않도록)
+    const mShow = Math.max(0, Math.round(depReal/60));
+    const depTime = fmtHM(new Date(nowMs + depReal*1000));
+    logEvt("알람: "+o.busNo+" "+mShow+"분"+(jumped?" (급변)":""));
+    if(mShow >= 1){
       notify((jumped?"버스 빨라짐":"곧 나가기")+" · "+o.busNo+"번",
-        (jumped?"예측이 당겨졌어요. ":"")+depTime+"에 나가세요 ("+m+"분 뒤)", 3,
-        busNoSpeech(o.busNo)+"번 버스"+(jumped?"가 빨라졌어요. ":", ")+m+"분 뒤에 나가세요.");
+        (jumped?"예측이 당겨졌어요. ":"")+depTime+"에 나가세요 ("+mShow+"분 뒤)", 3,
+        busNoSpeech(o.busNo)+"번 버스"+(jumped?"가 빨라졌어요. ":", ")+mShow+"분 뒤에 나가세요.");
     }else{
       notify("지금 나가세요 · "+o.busNo+"번", (jumped?"버스가 빨라졌어요. ":"")+"지금 나가야 탈 수 있어요!", 4,
         busNoSpeech(o.busNo)+"번 버스"+(jumped?"가 빨라졌어요. ":", ")+"지금 나가세요!");
