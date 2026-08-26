@@ -414,7 +414,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v69";
+const APP_VERSION = "v70";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1294,7 +1294,8 @@ async function computeOptions(){
   opts.sort((x,y)=>x.departSec-y.departSec);
   const unresolved = config.buses.filter(b => !matched.has(normBusNo(b)));
   // 출발시각을 30초 넘게 지난 버스(걸어가도 못 타는 차)는 제외하고 다음 차를 보여줌
-  return {opts: opts.filter(o=>o.departSec > -30).slice(0,3), unresolved, matchedAny: matched.size>0};
+  // 나갈 시각이 지나도 버스가 정류장을 지나기 전까지는 유지 (걸어가면서 도착까지 남은 시간을 봐야 함)
+  return {opts: opts.filter(o=>o.estSec > -15).slice(0,3), unresolved, matchedAny: matched.size>0};
 }
 
 /* ---------- 렌더링 ---------- */
@@ -1328,24 +1329,35 @@ function render(){
   for(const o of cachedOpts){
     const dep = o.departSec - elapsed;
     const arr = o.estSec - elapsed;
-    if(dep < -30) continue; // 이미 놓친 버스는 표시하지 않음
+    if(arr < -15) continue; // 버스가 정류장을 지난 뒤에만 카드 제거
     rank++;
     const depTime = new Date(now.getTime() + dep*1000);
     const arrTime = new Date(now.getTime() + arr*1000);
-    const urg = dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good";
+    // 나갈 시각을 지났으면 "이동 중" 모드: 버스 도착까지 남은 시간을 보여줌
+    const walking = dep < -30;
+    const urg = walking
+      ? (arr <= 90 ? "u-bad" : "u-warn")
+      : (dep <= 3*60 ? "u-bad" : dep <= 7*60 ? "u-warn" : "u-good");
     // 어르신 모드: 초 단위 없이 분으로만 크게 (읽기 부담 최소화)
-    const label = elderMode
-      ? (dep <= 40 ? `<em>지금 나가세요!</em>` : `<em>${Math.max(1, Math.round(dep/60))}분</em> 뒤에 나가세요`)
-      : (dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가세요`);
+    let label;
+    if(walking){
+      label = elderMode
+        ? (arr <= 40 ? `<em>버스가 곧 도착!</em>` : `<em>${Math.max(1, Math.round(arr/60))}분</em> 뒤 버스 도착`)
+        : (arr <= 10 ? `<em>버스가 곧 도착!</em>` : `<em>${fmtMin(arr).replace(" 뒤","")}</em> 뒤 버스 도착`);
+    }else{
+      label = elderMode
+        ? (dep <= 40 ? `<em>지금 나가세요!</em>` : `<em>${Math.max(1, Math.round(dep/60))}분</em> 뒤에 나가세요`)
+        : (dep <= 10 ? `<em>지금 나가세요!</em>` : `<em>${fmtMin(dep).replace(" 뒤","")}</em> 뒤에 나가세요`);
+    }
     html += `
     <div class="depart-card ${urg} ${rank===1?"best":""}">
       <div class="dc-head">
         <span class="busno">${o.busNo}</span>
-        <span class="dc-clock">${fmtHM(depTime)} 나가기</span>
+        <span class="dc-clock">${walking ? fmtHM(arrTime)+" 버스 도착" : fmtHM(depTime)+" 나가기"}</span>
       </div>
       <div class="depart-main">${label}</div>
       <div class="depart-sub">
-        <span class="dc-extra">${fmtHM(arrTime)} 정류장 도착 예정</span>
+        ${walking ? "" : `<span class="dc-extra">${fmtHM(arrTime)} 정류장 도착 예정</span>`}
         ${o.restStops?`<span>${o.restStops}정거장 전</span>`:""}
         ${isBusWaiting(o.busNo)?`<span style="color:var(--warn)">차량 대기 중 · 시간 변동 가능</span>`:""}
         ${o.lastStopName?`<span class="dc-extra">(${o.lastStopName} 통과)</span>`:""}
