@@ -414,7 +414,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v71";
+const APP_VERSION = "v72";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -583,6 +583,7 @@ function initProfiles(){
 const profileCache = new Map(); // 프로필별 마지막 도착 데이터 (전환 즉시 표시용)
 function applyProfile(i){
   profiles.active = i;
+  fetchGen++;
   // 이전 프로필 값이 남지 않도록 기본값 위에 프로필 데이터를 덮어씀
   Object.assign(config, JSON.parse(JSON.stringify(CONFIG_DEFAULTS)), JSON.parse(JSON.stringify(profiles.list[i].data)));
   saveProfiles();
@@ -636,7 +637,9 @@ function addProfile(){
   const name = prompt("새 프로필 이름 (예: 집, 회사, 본가)", "");
   if(!name || !name.trim()) return;
   profiles.list[profiles.active].data = snapshotConfig();
-  profiles.list.push({name: name.trim().slice(0,10), data: snapshotConfig()});
+  // 정류장·버스는 비우고 시작 (이전 프로필 정류장이 그대로 복사돼 헷갈리던 문제) - 시간·도보·푸시 설정은 물려받음
+  const data = Object.assign(snapshotConfig(), {stopId:"", stopIds:[], stopName:"", buses:[], pushOn:false});
+  profiles.list.push({name: name.trim().slice(0,10), data});
   applyProfile(profiles.list.length - 1);
   showView("settings"); // 새 프로필은 바로 설정 편집으로
 }
@@ -1171,6 +1174,11 @@ async function searchStop(){
 }
 function pickStop(id, name, shortId){
   const ids = String(id).split("|").filter(Boolean);
+  if(config.stopId && config.stopId !== ids[0]){
+    // 정류장이 바뀌면 이전 정류장의 버스는 지나가지 않을 수 있으므로 비움 (새 정류장 노선 칩에서 다시 선택)
+    config.buses = [];
+    document.getElementById("in-buses").value = "";
+  }
   config.stopId = ids[0];
   config.stopIds = ids;
   config.stopName = name + (shortId ? " ("+shortId+")" : "");
@@ -1240,16 +1248,19 @@ async function ensureStopIds(cfg){
   cfg = cfg || config;
   if(cfg.stopIds && cfg.stopIds.length) return;
   const save = () => { if(cfg === config) persistConfig(); else saveProfiles(); };
+  const stopId = cfg.stopId;
   const m = String(cfg.stopName||"").match(/\((\d{4,9})\)/);
   if(m){
     try{
       const list = await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNo:m[1]}, cfg);
+      if(cfg.stopId !== stopId) return; // 대기 중 프로필·정류장이 바뀜 → 남의 ID를 쓰지 않음
       const ids = (list||[]).filter(it=>it && it.nodeid).map(it=>String(it.nodeid));
       if(ids.includes(cfg.stopId) && ids.length > 1){
         cfg.stopIds = ids; save(); return;
       }
     }catch(e){ /* 보정 실패 시 단일 ID로 진행 */ }
   }
+  if(cfg.stopId !== stopId) return;
   cfg.stopIds = [cfg.stopId];
   save();
 }
@@ -2005,6 +2016,7 @@ function isBusWaiting(busNo){
 /* ---------- 자동 새로고침 루프 ---------- */
 let refreshTimer = null;
 let fetching = false;
+let fetchGen = 0; // 프로필 전환마다 증가 - 전환 전에 시작된 조회 결과는 폐기
 
 function inWindow(){
   const now = new Date();
@@ -2019,10 +2031,12 @@ async function doFetch(){
   if(fetching || !config.stopId) return;
   fetching = true;
   fetchingSince = Date.now();
+  const gen = fetchGen;
   setStatus("확인 중…", true);
   document.getElementById("err-box").innerHTML="";
   try{
     const {opts, unresolved} = await computeOptions();
+    if(gen !== fetchGen){ fetching = false; doFetch(); return; } // 조회 중 프로필 전환됨 → 이 결과는 버리고 새 프로필로 다시 조회
     stabilizeOpts(opts); // 원천 데이터가 굼떠도 카운트다운이 뒤로 튀지 않게 보정
     cachedOpts = opts;
     lastFetchAt = new Date();
@@ -2161,12 +2175,15 @@ function fillForm(){
   document.getElementById("in-walk").value = config.walkMin;
   document.getElementById("in-start").value = config.start;
   document.getElementById("in-end").value = config.end;
+  const sel = document.getElementById("sel-stop");
   if(config.stopId){
-    const sel = document.getElementById("sel-stop");
     sel.classList.remove("hidden");
     sel.innerHTML = "선택됨: <b>" + config.stopName + "</b>";
-    loadStopRoutes();
+  }else{
+    sel.classList.add("hidden"); sel.innerHTML = ""; // 프로필 전환·새 프로필 시 이전 정류장 표시가 남지 않게
+    document.getElementById("stop-results").innerHTML = "";
   }
+  loadStopRoutes();
   renderDayChips();
 }
 function renderDayChips(){
