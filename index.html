@@ -414,7 +414,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v70";
+const APP_VERSION = "v71";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -428,7 +428,7 @@ const store = {
   set(k,v){ try { window.localStorage.setItem(k,v); } catch(e){ memStore[k]=v; } }
 };
 
-let config = {
+const CONFIG_DEFAULTS = {
   apiKey:"", stopId:"", stopIds:[], stopName:"",
   cityCode:23, cityName:"인천광역시",
   buses:[],            // ["16","302"]
@@ -440,6 +440,7 @@ let config = {
   routeMap:{},         // (구버전 호환용)
   manualMap:{}         // (구버전 호환용)
 };
+let config = JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
 
 let importedCfg = null; // 공유 링크로 받은 설정 - initProfiles 뒤에 새 프로필로 적용
 let importedRaw = null; // 원본 페이로드 (카카오→Chrome 이동 시 설정을 실어 나르기 위해 보관)
@@ -475,8 +476,10 @@ function applySharedData(d){
   if(dup >= 0){
     applyProfile(dup);
   }else{
-    const data = snapshotConfig(); // 최신 필드 형태 유지 + 받은 값 덮어쓰기
+    const data = JSON.parse(JSON.stringify(CONFIG_DEFAULTS)); // 최신 필드 형태 유지 + 받은 값 덮어쓰기 (현재 프로필 값은 섞지 않음)
     Object.assign(data, JSON.parse(JSON.stringify(d)));
+    delete data.shareName;
+    if(!Array.isArray(data.stopIds) || (data.stopIds.length && !data.stopIds.includes(data.stopId))) data.stopIds = [];
     delete data.apiKey;
     data.pushOn = false; // 푸시는 받은 사람이 직접 켜도록
     profiles.list.push({name: String(d.shareName || "공유받음").slice(0,10), data});
@@ -580,7 +583,8 @@ function initProfiles(){
 const profileCache = new Map(); // 프로필별 마지막 도착 데이터 (전환 즉시 표시용)
 function applyProfile(i){
   profiles.active = i;
-  Object.assign(config, JSON.parse(JSON.stringify(profiles.list[i].data)));
+  // 이전 프로필 값이 남지 않도록 기본값 위에 프로필 데이터를 덮어씀
+  Object.assign(config, JSON.parse(JSON.stringify(CONFIG_DEFAULTS)), JSON.parse(JSON.stringify(profiles.list[i].data)));
   saveProfiles();
   persistConfig();
   notified.clear(); lastAlarmAt.clear(); seenSoon.clear(); lastMinByBus.clear();
@@ -600,24 +604,23 @@ function applyProfile(i){
 }
 /* 비활성 프로필 도착정보를 미리 받아둠 → 프로필 전환 시 즉시 표시 */
 let prefetching = false;
+/* 전역 config를 바꿔치기하지 않고 프로필 데이터를 직접 넘겨 조회 (v71: 바꿔치기 중 다른 코드가 config를 저장해 프로필끼리 섞이던 버그 수정) */
 async function prefetchProfiles(){
   if(prefetching || fetching || document.hidden) return;
-  if(!document.getElementById("view-settings").classList.contains("hidden")) return; // 설정 편집 중엔 config를 건드리지 않음
   prefetching = true;
   try{
     for(let i = 0; i < profiles.list.length && i < 5; i++){
       if(i === profiles.active) continue;
-      const d = profiles.list[i].data;
+      const p = profiles.list[i];
+      const d = p.data;
       if(!d || !d.stopId || !(d.buses||[]).length) continue;
       const c = profileCache.get(i);
       if(c && Date.now() - c.at.getTime() < 60*1000) continue; // 1분 이내 데이터면 충분
-      const backup = JSON.parse(JSON.stringify(config));
       try{
-        Object.assign(config, JSON.parse(JSON.stringify(d)));
-        const {opts} = await computeOptions();
-        profileCache.set(i, {opts, raw: [], at: new Date()});
+        const {opts} = await computeOptions(d);
+        // 조회 중 프로필이 추가·삭제돼 순서가 바뀌었으면 캐시하지 않음
+        if(profiles.list[i] === p && i !== profiles.active) profileCache.set(i, {opts, raw: [], at: new Date()});
       }catch(e){ /* 프리페치 실패는 무시 */ }
-      Object.assign(config, backup);
     }
   }finally{ prefetching = false; }
 }
@@ -648,6 +651,7 @@ function deleteProfile(){
   if(profiles.list.length <= 1){ alert("프로필이 하나뿐이라 삭제할 수 없어요."); return; }
   if(!confirm('"' + profiles.list[profiles.active].name + '" 프로필을 삭제할까요?')) return;
   profiles.list.splice(profiles.active, 1);
+  profileCache.clear(); // 순번이 밀리므로 캐시 무효화
   applyProfile(0);
 }
 function renderProfileChips(){
@@ -730,11 +734,12 @@ function apiErr(msg, opts){
 }
 /* TAGO API 호출(JSON) + 자동 재시도. 반환: 아이템 배열 (결과 없음이면 null) */
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
-async function tagoCall(service, op, params){
+async function tagoCall(service, op, params, cfg){
+  cfg = cfg || config;
   let lastErr = null;
   for(let attempt=0; attempt<3; attempt++){
     try{
-      const q = "op=" + encodeURIComponent(service + "/" + op) + "&cityCode=" + ((provider()==="tago" && config.cityCode) || 23) +
+      const q = "op=" + encodeURIComponent(service + "/" + op) + "&cityCode=" + ((provider(cfg)==="tago" && cfg.cityCode) || 23) +
         Object.entries(params||{}).map(([k,v])=>"&"+k+"="+encodeURIComponent(v)).join("");
       const text = await fetchText(PUSH_SERVER + "/p/tago?" + q);
       let data;
@@ -778,8 +783,8 @@ async function tagoCall(service, op, params){
 
 /* ---------- 정류소 검색 (이름 또는 정류소번호) ---------- */
 /* ---------- 지역별 제공자: 서울(S1)·경기(G41)는 자체 API, 나머지는 TAGO ---------- */
-function provider(){
-  const c = String(config.cityCode||"");
+function provider(cfg){
+  const c = String((cfg||config).cityCode||"");
   return c==="S1" ? "seoul" : c==="G41" ? "gyeonggi" : "tago";
 }
 /* 서울 버스 API (ws.bus.go.kr) */
@@ -1186,8 +1191,9 @@ function parseSeoulArrmsg(msg){
   const s = msg.match(/\[(\d+)번째 전\]/);
   return {sec: parseInt(m[1],10)*60 + (m[2]?parseInt(m[2],10):0), stops: s?s[1]:""};
 }
-async function fetchArrivalsSeoul(){
-  const items = await seoulCall("stationinfo/getStationByUid", {arsId:config.stopId});
+async function fetchArrivalsSeoul(cfg){
+  cfg = cfg || config;
+  const items = await seoulCall("stationinfo/getStationByUid", {arsId:cfg.stopId});
   if(!items) return [];
   const out = [];
   for(const it of items){
@@ -1204,8 +1210,9 @@ async function fetchArrivalsSeoul(){
   }
   return out;
 }
-async function fetchArrivalsGg(){
-  const body = await ggCall("busarrivalservice/v2/getBusArrivalListv2", {stationId:config.stopId});
+async function fetchArrivalsGg(cfg){
+  cfg = cfg || config;
+  const body = await ggCall("busarrivalservice/v2/getBusArrivalListv2", {stationId:cfg.stopId});
   const list = body && body.busArrivalList;
   if(!list) return [];
   const arr = Array.isArray(list) ? list : [list];
@@ -1228,30 +1235,34 @@ async function fetchArrivalsGg(){
   return out;
 }
 /* 기존 저장 정류장(단일 ID)에 쌍둥이 ID가 있는지 1회 탐색해 보정 */
-async function ensureStopIds(){
-  if(config.stopIds && config.stopIds.length) return;
-  const m = String(config.stopName||"").match(/\((\d{4,9})\)/);
+/* cfg가 활성 config면 persistConfig, 비활성 프로필 데이터면 프로필 저장만 (활성 프로필을 덮어쓰지 않음) */
+async function ensureStopIds(cfg){
+  cfg = cfg || config;
+  if(cfg.stopIds && cfg.stopIds.length) return;
+  const save = () => { if(cfg === config) persistConfig(); else saveProfiles(); };
+  const m = String(cfg.stopName||"").match(/\((\d{4,9})\)/);
   if(m){
     try{
-      const list = await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNo:m[1]});
+      const list = await tagoCall("BusSttnInfoInqireService", "getSttnNoList", {nodeNo:m[1]}, cfg);
       const ids = (list||[]).filter(it=>it && it.nodeid).map(it=>String(it.nodeid));
-      if(ids.includes(config.stopId) && ids.length > 1){
-        config.stopIds = ids; persistConfig(); return;
+      if(ids.includes(cfg.stopId) && ids.length > 1){
+        cfg.stopIds = ids; save(); return;
       }
     }catch(e){ /* 보정 실패 시 단일 ID로 진행 */ }
   }
-  config.stopIds = [config.stopId];
-  persistConfig();
+  cfg.stopIds = [cfg.stopId];
+  save();
 }
-async function fetchArrivals(){
-  const p = provider();
-  if(p==="seoul") return fetchArrivalsSeoul();
-  if(p==="gyeonggi") return fetchArrivalsGg();
-  await ensureStopIds();
-  const ids = (config.stopIds && config.stopIds.length) ? config.stopIds : [config.stopId];
+async function fetchArrivals(cfg){
+  cfg = cfg || config;
+  const p = provider(cfg);
+  if(p==="seoul") return fetchArrivalsSeoul(cfg);
+  if(p==="gyeonggi") return fetchArrivalsGg(cfg);
+  await ensureStopIds(cfg);
+  const ids = (cfg.stopIds && cfg.stopIds.length) ? cfg.stopIds : [cfg.stopId];
   let firstErr = null;
   const lists = await Promise.all(ids.map(id =>
-    tagoCall("ArvlInfoInqireService", "getSttnAcctoArvlPrearngeInfoList", {nodeId:id})
+    tagoCall("ArvlInfoInqireService", "getSttnAcctoArvlPrearngeInfoList", {nodeId:id}, cfg)
       .catch(e => { if(!firstErr) firstErr = e; return null; })
   ));
   if(firstErr && lists.every(l => l === null)) throw firstErr;
@@ -1278,21 +1289,24 @@ async function fetchArrivals(){
 
 /* ---------- 출발 옵션 계산 ---------- */
 const normBusNo = s => String(s||"").replace(/\s/g,"").toUpperCase();
-async function computeOptions(){
-  const arrivals = await fetchArrivals();
-  lastArrivalsRaw = arrivals;
+/* cfg 생략 시 활성 config. 다른 프로필(프리페치)은 cfg를 넘겨 전역 config를 건드리지 않음 */
+async function computeOptions(cfg){
+  cfg = cfg || config;
+  const arrivals = await fetchArrivals(cfg);
+  if(cfg === config) lastArrivalsRaw = arrivals;
 
-  const wantedNos = config.buses.map(normBusNo);
+  const buses = cfg.buses || [];
+  const wantedNos = buses.map(normBusNo);
   const matched = new Set();
   const opts = [];
   for(const a of arrivals){
     const i = wantedNos.indexOf(normBusNo(a.routeNo));
     if(i < 0) continue;
     matched.add(wantedNos[i]);
-    opts.push({...a, busNo: config.buses[i], departSec: a.estSec - config.walkMin*60});
+    opts.push({...a, busNo: buses[i], departSec: a.estSec - cfg.walkMin*60});
   }
   opts.sort((x,y)=>x.departSec-y.departSec);
-  const unresolved = config.buses.filter(b => !matched.has(normBusNo(b)));
+  const unresolved = buses.filter(b => !matched.has(normBusNo(b)));
   // 출발시각을 30초 넘게 지난 버스(걸어가도 못 타는 차)는 제외하고 다음 차를 보여줌
   // 나갈 시각이 지나도 버스가 정류장을 지나기 전까지는 유지 (걸어가면서 도착까지 남은 시간을 봐야 함)
   return {opts: opts.filter(o=>o.estSec > -15).slice(0,3), unresolved, matchedAny: matched.size>0};
