@@ -416,7 +416,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v73";
+const APP_VERSION = "v74";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1583,6 +1583,9 @@ function logEvt(msg){
 }
 const isMobileDevice = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+/* 앱인토스 미니앱 번들로 실행 중인지 (busgak-toss 빌드가 head에 window.BUSGAK_ENV="toss"를 주입).
+   토스 웹뷰엔 Notification·서비스워커·wakeLock이 없어 토스 SDK 브리지(window.busgakNative: 햅틱·화면켜짐)로 대체 */
+const IS_TOSS = window.BUSGAK_ENV === "toss";
 const utterKeep = new Set(); // iOS: 발화 객체가 가비지컬렉션으로 사라져 무음이 되는 버그 방지
 function speakOnce(text, useVoice, label){
   const u = new SpeechSynthesisUtterance(text);
@@ -1780,6 +1783,7 @@ function notify(title, body, soundTimes, speech, force){
   if(speech) speak(speech);
   if(!alarmOn && force !== true) return; // 종 꺼짐이면 배너·소리는 생략 (테스트 버튼만 예외)
   beep(soundTimes||2);
+  if(window.busgakNative) window.busgakNative.haptic("error"); // 토스 웹뷰: 무음 모드에서도 진동으로 알림
   if(("Notification" in window) && Notification.permission==="granted"){
     // 모바일에서는 new Notification()이 막혀 있어 서비스워커 경유로 표시
     try{
@@ -2078,8 +2082,9 @@ function setStatus(t, live){
 let wakeLockObj = null;
 async function updateWakeLock(){
   try{
-    if(!("wakeLock" in navigator)) return;
     const want = !document.hidden && !!config.stopId;
+    if(window.busgakNative){ window.busgakNative.awake(want); return; } // 토스 웹뷰: SDK 화면 켜짐 모드 사용
+    if(!("wakeLock" in navigator)) return;
     if(want && !wakeLockObj){
       wakeLockObj = await navigator.wakeLock.request("screen");
       wakeLockObj.addEventListener("release", ()=>{ wakeLockObj = null; });
@@ -2262,7 +2267,7 @@ function iosAddSteps(startNo){
       '<b>' + n2 + '.</b> <b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b><br><br>';
 }
 function maybeShowInstall(){
-  if(isStandalone()) return;
+  if(isStandalone() || IS_TOSS) return; // 토스 안에서는 홈 화면 설치 개념이 없음
   const modal = document.getElementById("install-modal");
   const body = document.getElementById("install-modal-body");
   const mainBtn = document.getElementById("install-modal-main");
