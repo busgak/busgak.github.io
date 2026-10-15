@@ -1,5 +1,5 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v75";
+const CACHE = "bus-alarm-v76";
 const FONT_CACHE = "bus-alarm-fonts-v1"; // 폰트 CSS·파일: 버전이 URL에 박혀 있어 캐시 우선 안전
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
