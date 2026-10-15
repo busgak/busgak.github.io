@@ -1,5 +1,6 @@
 ﻿/* 버스 출발 알리미 서비스워커 - 앱 껍데기는 캐시, API는 항상 네트워크 */
-const CACHE = "bus-alarm-v72";
+const CACHE = "bus-alarm-v73";
+const FONT_CACHE = "bus-alarm-fonts-v1"; // 폰트 CSS·파일: 버전이 URL에 박혀 있어 캐시 우선 안전
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -17,7 +18,7 @@ self.addEventListener("install", e => {
 });
 self.addEventListener("activate", e => {
   e.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== FONT_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -46,6 +47,18 @@ self.addEventListener("notificationclick", e => {
 });
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
+  // 폰트 CDN(Pretendard CSS + woff2)은 캐시 우선: 앱을 다시 켤 때 네트워크를 기다리지 않고 바로 글꼴 표시
+  if (url.hostname === "cdn.jsdelivr.net" && e.request.method === "GET") {
+    e.respondWith(
+      caches.open(FONT_CACHE).then(c =>
+        c.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+          if (res.ok) c.put(e.request, res.clone());
+          return res;
+        }))
+      )
+    );
+    return;
+  }
   // 같은 출처의 앱 파일만 캐시 우선, 나머지(버스 API 등)는 네트워크 직행
   if (url.origin === location.origin) {
     e.respondWith(

@@ -6,7 +6,9 @@
 <meta name="theme-color" content="#0e0e11">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- 폰트 CSS는 첫 화면 그리기를 막지 않게 비동기 로드 (로드 전엔 시스템 글꼴로 먼저 표시) -->
+<link rel="preload" as="style" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"></noscript>
 <title>버스각</title>
 <meta property="og:title" content="버스각">
 <meta property="og:description" content="지금 나가면 탈 수 있는 버스를 알려주는 출근 알람">
@@ -414,7 +416,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v72";
+const APP_VERSION = "v73";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -2027,6 +2029,22 @@ function inWindow(){
   return cur >= sh*60+sm && cur <= eh*60+em;
 }
 let fetchingSince = 0;
+/* ---------- 마지막 도착정보 스냅샷: 앱을 다시 켤 때 빈 화면 대신 바로 카운트다운 표시 ---------- */
+const SNAP_MAX_AGE = 10*60*1000; // 10분 이내 데이터만 복원 (프로필 전환 캐시와 동일 기준)
+function saveSnapshot(){
+  try{
+    store.set("busAlarmSnap", JSON.stringify({pi: profiles.active, stopId: config.stopId, at: lastFetchAt.getTime(), opts: cachedOpts}));
+  }catch(e){}
+}
+function restoreSnapshot(){
+  try{
+    const s = JSON.parse(store.get("busAlarmSnap")||"null");
+    if(!s || s.pi !== profiles.active || s.stopId !== config.stopId || !Array.isArray(s.opts)) return false;
+    if(Date.now() - s.at > SNAP_MAX_AGE) return false;
+    cachedOpts = s.opts; lastFetchAt = new Date(s.at);
+    return true;
+  }catch(e){ return false; }
+}
 async function doFetch(){
   if(fetching || !config.stopId) return;
   fetching = true;
@@ -2040,6 +2058,7 @@ async function doFetch(){
     stabilizeOpts(opts); // 원천 데이터가 굼떠도 카운트다운이 뒤로 튀지 않게 보정
     cachedOpts = opts;
     lastFetchAt = new Date();
+    saveSnapshot(); // 다음 실행 시 첫 화면을 즉시 그리기 위해 저장
     render();
     renderUnmatched(unresolved);
     checkAlarms();
@@ -2423,7 +2442,9 @@ maybeShowInstall();
 updatePermBanner();
 // 첫 화면은 항상 홈 (미설정이면 홈의 안내가 설정 탭으로 유도)
 if(config.stopId && config.buses.length){
-  doFetch();
+  restoreSnapshot(); // 최근 10분 내 데이터가 있으면 즉시 카운트다운부터 표시
+  doFetch();         // 먼저 호출해 fetching 플래그를 켬
+  render();          // 스냅샷이 있으면 카드, 없으면 로딩 카드가 바로 보임 (이전엔 첫 응답까지 빈 화면)
   keepAwake();
 }
 </script>
