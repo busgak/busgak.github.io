@@ -416,7 +416,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v76";
+const APP_VERSION = "v77";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1375,13 +1375,40 @@ function addMinToTm(tm, min){ // "22:30" + 95 → "00:05" (자정 넘김 허용)
   const mod = ((tot % 1440) + 1440) % 1440;
   return {tm: String(Math.floor(mod/60)).padStart(2,"0") + ":" + String(mod%60).padStart(2,"0"), min: tot};
 }
-/* 이 정류장 기준 첫차·막차 추정: 기점 출발 시각 + (기점→이 정류장 정거장 수 × 정거장당 소요시간)
-   반환 {first,last}(기점 기준) + {estFirst,estLast,estFirstMin,estLastMin}(추정, 순번을 알 때만) */
+/* 워커가 새벽·밤에 이 정류장 도착정보를 직접 관측해 기록한 노선별 첫차·막차(실측, 최근 14일 중앙값)를 받아옴.
+   정류장당 1시간에 1번만 조회. 쌍둥이 정류장 ID는 차례로 시도해 처음 데이터가 있는 것을 사용 */
+const obsFetchedAt = new Map(); // stopId → ms
+async function fetchObservedTimes(cfg){
+  if(cfg !== config || !cfg.stopId) return;
+  const last = obsFetchedAt.get(cfg.stopId) || 0;
+  if(Date.now() - last < 60*60*1000) return;
+  obsFetchedAt.set(cfg.stopId, Date.now());
+  const ids = [...new Set([cfg.stopId, ...(cfg.stopIds||[])].map(String))];
+  const wanted = (cfg.buses||[]).map(normBusNo);
+  for(const id of ids){
+    try{
+      const text = await fetchText(PUSH_SERVER + "/firstlast?cityCode=" + encodeURIComponent(cfg.cityCode||"") + "&stopId=" + encodeURIComponent(id));
+      const data = JSON.parse(text);
+      if(!data || typeof data !== "object" || !Object.keys(data).length) continue;
+      for(const [no, b] of Object.entries(data)){
+        if(!wanted.includes(normBusNo(no))) continue;
+        noteRouteExtra(cfg, no, {obs: b, obsAt: Date.now()});
+      }
+      return;
+    }catch(e){ /* 관측 데이터는 보조 정보 → 실패 무시 */ }
+  }
+}
+function todayBucket(now){ const d = (now||new Date()).getDay(); return (d===0 || d===6) ? "we" : "wd"; }
+/* 이 정류장 기준 첫차·막차: ① 워커 관측값(실측)이 있으면 우선 ② 없으면 기점 출발 시각 + (정거장 수 × 정거장당 소요시간) 추정
+   반환 {first,last}(기점 기준) + {estFirst,estLast,estFirstMin,estLastMin, firstObs,lastObs(실측 여부), obsN} */
 function stopTimes(busNo, cfg){
   cfg = cfg || config;
   const t = getRouteTimes(busNo, cfg);
-  if(!t || !(t.first || t.last)) return null;
-  const out = {first: t.first, last: t.last, estFirst: "", estLast: "", estFirstMin: null, estLastMin: null};
+  if(!t || !(t.first || t.last || (t.obs && (t.obs.wd || t.obs.we)))) return null;
+  const out = {first: t.first, last: t.last, estFirst: "", estLast: "", estFirstMin: null, estLastMin: null, firstObs: false, lastObs: false, obsN: 0};
+  const ob = t.obs && t.obs[todayBucket()];
+  const obsFirst = ob && ob.nFirst >= 1 && ob.first ? ob : null;
+  const obsLast  = ob && ob.nLast  >= 1 && ob.last  ? ob : null;
   const sps = getSecPerStop(busNo, cfg);
   let firstBase = t.first, lastBase = t.last, nFirst = null, nLast = null;
   if(t.ord > 0){
@@ -1393,8 +1420,13 @@ function stopTimes(busNo, cfg){
   }
   if(nLast != null && lastBase){ const r = addMinToTm(lastBase, nLast*sps/60); out.estLast = r.tm; out.estLastMin = r.min; }
   if(nFirst != null && firstBase){ const r = addMinToTm(firstBase, nFirst*sps/60); out.estFirst = r.tm; out.estFirstMin = r.min; }
+  // 실측이 있으면 추정을 덮어씀
+  if(obsFirst){ out.estFirst = obsFirst.first; out.estFirstMin = obsFirst.firstMin; out.firstObs = true; out.obsN = Math.max(out.obsN, obsFirst.nFirst||0); }
+  if(obsLast){ out.estLast = obsLast.last; out.estLastMin = obsLast.lastMin; out.lastObs = true; out.obsN = Math.max(out.obsN, obsLast.nLast||0); }
   return out;
 }
+/* 표시용: 실측이면 그대로, 추정이면 '약' 접두 */
+function fmtStopTime(tm, observed){ return tm ? ((observed ? "" : "약 ") + tm) : "-"; }
 /* 이 정류장 기준 운행 상태: "before"(첫차 전) / "after"(막차 통과 추정 후 20분 경과) / "in" / null */
 function stopServiceState(st, now){
   if(!st || st.estFirstMin == null || st.estLastMin == null) return null;
@@ -1466,6 +1498,7 @@ async function computeOptions(cfg){
     lastArrivalsRaw = arrivals;
     try{ learnSecPerStop(cfg, arrivals); }catch(e){}
     refreshRouteTimes(cfg, arrivals).catch(()=>{}); // 첫차·막차는 화면을 막지 않고 뒤에서 갱신
+    fetchObservedTimes(cfg).catch(()=>{});          // 워커 관측 첫차·막차 (1시간마다)
   }
 
   const buses = cfg.buses || [];
@@ -1550,8 +1583,8 @@ function render(){
         ${o.lastStopName?`<span class="dc-extra">(${o.lastStopName} 통과)</span>`:""}
         ${o.low==="1"?`<span class="dc-extra">저상</span>`:""}
         ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
-        ${(st => !st ? "" : (st.estLast
-            ? `<span class="dc-extra">이 정류장 첫차 약 ${st.estFirst||"-"} · 막차 약 ${st.estLast}</span>`
+        ${(st => !st ? "" : ((st.estLast || st.estFirst)
+            ? `<span class="dc-extra">이 정류장 첫차 ${fmtStopTime(st.estFirst, st.firstObs)} · 막차 ${fmtStopTime(st.estLast, st.lastObs)}</span>`
             : `<span class="dc-extra">기점 첫차 ${st.first||"-"} · 막차 ${st.last||"-"}</span>`))(stopTimes(o.busNo))}
       </div>
     </div>`;
@@ -1578,13 +1611,15 @@ function renderUnmatched(unresolved){
   if(!unresolved || unresolved.length===0){ el.innerHTML=""; el.dataset.sig=""; return; }
   const nowNos = [...new Set(lastArrivalsRaw.map(a=>a.routeNo).filter(Boolean))];
   const now = new Date();
-  let anyBase = false;
+  let anyBase = false, anyEst = false, anyObs = false;
   const timeLines = unresolved.map(b => {
     const st = stopTimes(b); if(!st) return "";
-    if(st.estLast){
+    if(st.estLast || st.estFirst){
       const state = stopServiceState(st, now);
-      const note = state==="before" ? " → 아직 첫차 전이에요" : state==="after" ? " → 막차가 지나간 것 같아요" : "";
-      return `<br><b>${escHtml(b)}</b>번 이 정류장 첫차 약 ${st.estFirst||"-"} · 막차 약 ${st.estLast}${note}`;
+      const note = state==="before" ? " → 아직 첫차 전이에요" : state==="after" ? (st.lastObs ? " → 막차가 지나갔어요" : " → 막차가 지나간 것 같아요") : "";
+      if(!st.firstObs || !st.lastObs) anyEst = true;
+      if(st.firstObs || st.lastObs) anyObs = true;
+      return `<br><b>${escHtml(b)}</b>번 이 정류장 첫차 ${fmtStopTime(st.estFirst, st.firstObs)} · 막차 ${fmtStopTime(st.estLast, st.lastObs)}${note}`;
     }
     anyBase = true;
     const t = getRouteTimes(b);
@@ -1596,7 +1631,7 @@ function renderUnmatched(unresolved){
   if(el.dataset.sig === sig && el.innerHTML) return;
   el.dataset.sig = sig;
   el.innerHTML = `<div class="notice"><b>${unresolved.join(", ")}</b>번은 지금 이 정류장에 접근 중인 차가 없어요.
-  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}${timeLines}${timeLines ? `<br><span class="muted">${anyBase ? "기점 시각은 출발 정류장 기준이에요. " : ""}'약'은 기점 출발 시각에 이 정류장까지 이동시간을 더한 추정이라 몇 분 차이 날 수 있어요</span>` : ""}
+  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}${timeLines}${timeLines ? `<br><span class="muted">${anyBase ? "기점 시각은 출발 정류장 기준이에요. " : ""}${anyEst ? "'약'은 기점 출발 시각에 이 정류장까지 이동시간을 더한 추정이라 몇 분 차이 날 수 있어요. " : ""}${anyObs ? "'약'이 없는 시각은 최근 이 정류장에서 실제로 관측된 도착 시각이에요." : ""}</span>` : ""}
   <br><span class="muted">버스번호가 계속 안 잡히면 설정의 버스번호가 정류장 노선과 정확히 일치하는지 확인해 주세요.</span></div>`;
 }
 
