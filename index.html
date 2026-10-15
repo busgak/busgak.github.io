@@ -416,7 +416,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v77";
+const APP_VERSION = "v78";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1384,21 +1384,25 @@ async function fetchObservedTimes(cfg){
   if(Date.now() - last < 60*60*1000) return;
   obsFetchedAt.set(cfg.stopId, Date.now());
   const ids = [...new Set([cfg.stopId, ...(cfg.stopIds||[])].map(String))];
-  const wanted = (cfg.buses||[]).map(normBusNo);
+  let data = null; // null = 서버 응답 실패(기존 값 유지), {} = 응답은 왔지만 데이터 없음
   for(const id of ids){
     try{
-      const text = await fetchText(PUSH_SERVER + "/firstlast?cityCode=" + encodeURIComponent(cfg.cityCode||"") + "&stopId=" + encodeURIComponent(id));
-      const data = JSON.parse(text);
-      if(!data || typeof data !== "object" || !Object.keys(data).length) continue;
-      for(const [no, b] of Object.entries(data)){
-        if(!wanted.includes(normBusNo(no))) continue;
-        noteRouteExtra(cfg, no, {obs: b, obsAt: Date.now()});
-      }
-      return;
+      const d = JSON.parse(await fetchText(PUSH_SERVER + "/firstlast?cityCode=" + encodeURIComponent(cfg.cityCode||"") + "&stopId=" + encodeURIComponent(id)));
+      if(d && typeof d === "object"){ data = data || {}; if(Object.keys(d).length){ data = d; break; } }
     }catch(e){ /* 관측 데이터는 보조 정보 → 실패 무시 */ }
   }
+  if(!data) return;
+  for(const no of (cfg.buses||[])){
+    const hit = Object.entries(data).find(([k]) => normBusNo(k) === normBusNo(no));
+    if(hit) noteRouteExtra(cfg, no, {obs: hit[1], obsAt: Date.now()});
+    else { const t = getRouteTimes(no, cfg); if(t && t.obs) noteRouteExtra(cfg, no, {obs: null, obsAt: Date.now()}); }
+  }
 }
-function todayBucket(now){ const d = (now||new Date()).getDay(); return (d===0 || d===6) ? "we" : "wd"; }
+function todayBucket(now, forLast){
+  const d = new Date(now || Date.now());
+  if(forLast && d.getHours() < 3) d.setDate(d.getDate() - 1); // 새벽 3시 전의 '막차'는 전날 운행의 연장
+  const w = d.getDay(); return (w===0 || w===6) ? "we" : "wd";
+}
 /* 이 정류장 기준 첫차·막차: ① 워커 관측값(실측)이 있으면 우선 ② 없으면 기점 출발 시각 + (정거장 수 × 정거장당 소요시간) 추정
    반환 {first,last}(기점 기준) + {estFirst,estLast,estFirstMin,estLastMin, firstObs,lastObs(실측 여부), obsN} */
 function stopTimes(busNo, cfg){
@@ -1406,9 +1410,10 @@ function stopTimes(busNo, cfg){
   const t = getRouteTimes(busNo, cfg);
   if(!t || !(t.first || t.last || (t.obs && (t.obs.wd || t.obs.we)))) return null;
   const out = {first: t.first, last: t.last, estFirst: "", estLast: "", estFirstMin: null, estLastMin: null, firstObs: false, lastObs: false, obsN: 0};
-  const ob = t.obs && t.obs[todayBucket()];
-  const obsFirst = ob && ob.nFirst >= 1 && ob.first ? ob : null;
-  const obsLast  = ob && ob.nLast  >= 1 && ob.last  ? ob : null;
+  const obsFresh = t.obs && Date.now() - (t.obsAt||0) < 3*24*3600*1000; // 3일 넘게 서버와 못 맞춘 관측값은 추정으로 복귀
+  const obF = obsFresh ? t.obs[todayBucket()] : null, obL = obsFresh ? t.obs[todayBucket(null, true)] : null;
+  const obsFirst = obF && obF.nFirst >= 1 && obF.first ? obF : null;
+  const obsLast  = obL && obL.nLast  >= 1 && obL.last  ? obL : null;
   const sps = getSecPerStop(busNo, cfg);
   let firstBase = t.first, lastBase = t.last, nFirst = null, nLast = null;
   if(t.ord > 0){
@@ -1433,10 +1438,9 @@ function stopServiceState(st, now){
   now = now || new Date();
   let cur = now.getHours()*60 + now.getMinutes();
   const f = st.estFirstMin, l = st.estLastMin + 20;
-  if(l >= 1440 && cur < f) cur += 1440; // 막차가 자정을 넘기면 새벽 시간은 전날 연장선으로
-  if(cur < f) return "before";
-  if(cur > l) return "after";
-  return "in";
+  if(cur < f) cur += 1440;               // 첫차 전 시각은 전날 운행의 연장선(f ~ f+24h)에 놓고 본다
+  if(cur <= l) return "in";
+  return (cur - l) < (f + 1440 - cur) ? "after" : "before"; // 막차 지난 뒤: 막차에 가까우면 '지나갔어요', 첫차에 가까우면 '첫차 전'
 }
 /* 운행 상태 추정: "before"(첫차 전) / "after"(막차 기점 출발 후 90분 경과) / "in" / null */
 function routeServiceState(t, now){
@@ -1611,14 +1615,14 @@ function renderUnmatched(unresolved){
   if(!unresolved || unresolved.length===0){ el.innerHTML=""; el.dataset.sig=""; return; }
   const nowNos = [...new Set(lastArrivalsRaw.map(a=>a.routeNo).filter(Boolean))];
   const now = new Date();
-  let anyBase = false, anyEst = false, anyObs = false;
+  let anyBase = false, anyEst = false, anyObs = false, obsDays = 0;
   const timeLines = unresolved.map(b => {
     const st = stopTimes(b); if(!st) return "";
     if(st.estLast || st.estFirst){
       const state = stopServiceState(st, now);
       const note = state==="before" ? " → 아직 첫차 전이에요" : state==="after" ? (st.lastObs ? " → 막차가 지나갔어요" : " → 막차가 지나간 것 같아요") : "";
       if(!st.firstObs || !st.lastObs) anyEst = true;
-      if(st.firstObs || st.lastObs) anyObs = true;
+      if(st.firstObs || st.lastObs){ anyObs = true; obsDays = Math.max(obsDays, st.obsN||0); }
       return `<br><b>${escHtml(b)}</b>번 이 정류장 첫차 ${fmtStopTime(st.estFirst, st.firstObs)} · 막차 ${fmtStopTime(st.estLast, st.lastObs)}${note}`;
     }
     anyBase = true;
@@ -1631,7 +1635,7 @@ function renderUnmatched(unresolved){
   if(el.dataset.sig === sig && el.innerHTML) return;
   el.dataset.sig = sig;
   el.innerHTML = `<div class="notice"><b>${unresolved.join(", ")}</b>번은 지금 이 정류장에 접근 중인 차가 없어요.
-  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}${timeLines}${timeLines ? `<br><span class="muted">${anyBase ? "기점 시각은 출발 정류장 기준이에요. " : ""}${anyEst ? "'약'은 기점 출발 시각에 이 정류장까지 이동시간을 더한 추정이라 몇 분 차이 날 수 있어요. " : ""}${anyObs ? "'약'이 없는 시각은 최근 이 정류장에서 실제로 관측된 도착 시각이에요." : ""}</span>` : ""}
+  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}${timeLines}${timeLines ? `<br><span class="muted">${anyBase ? "기점 시각은 출발 정류장 기준이에요. " : ""}${anyEst ? "'약'은 기점 출발 시각에 이 정류장까지 이동시간을 더한 추정이라 몇 분 차이 날 수 있어요. " : ""}${anyObs ? `'약'이 없는 시각은 최근 ${obsDays}일간 이 정류장에서 실제로 관측된 도착 시각이에요.` : ""}</span>` : ""}
   <br><span class="muted">버스번호가 계속 안 잡히면 설정의 버스번호가 정류장 노선과 정확히 일치하는지 확인해 주세요.</span></div>`;
 }
 
