@@ -416,7 +416,7 @@ if(location.hostname === "busgak.github.io"){
    - 도착 응답에 버스번호(routeno)가 포함되므로 노선 매핑 API가 필요 없음
    ===================================================================== */
 
-const APP_VERSION = "v74";
+const APP_VERSION = "v75";
 const ALARM_LEAD = 0; // 고정 안전 여유 제거 (화면 숫자와 알람이 어긋나 보여서) - 보정은 노선별 학습에만 맡김
 const TAGO_HOST = "https://apis.data.go.kr/1613000"; // 국토교통부 TAGO (전국 버스정보)
 // 앱 내장 인증키 (공공데이터포털 무료 발급, TAGO 도착정보·정류소정보 활용신청 완료된 키)
@@ -1206,7 +1206,10 @@ async function fetchArrivalsSeoul(cfg){
   const items = await seoulCall("stationinfo/getStationByUid", {arsId:cfg.stopId});
   if(!items) return [];
   const out = [];
+  const wantedNos = (cfg.buses||[]).map(normBusNo);
   for(const it of items){
+    // 서울 도착정보에는 노선별 첫차·막차(firstTm/lastTm, 기점 출발 기준)가 함께 옴
+    if(cfg === config && wantedNos.includes(normBusNo(it.rtNm))) noteRouteTimes(cfg, it.rtNm, it.firstTm, it.lastTm, it.term);
     for(const [msg, tr] of [[it.arrmsg1, it.traTime1],[it.arrmsg2, it.traTime2]]){
       let sec = null, stops = "";
       const parsed = parseSeoulArrmsg(String(msg||""));
@@ -1302,11 +1305,90 @@ async function fetchArrivals(cfg){
 
 /* ---------- 출발 옵션 계산 ---------- */
 const normBusNo = s => String(s||"").replace(/\s/g,"").toUpperCase();
+
+/* ---------- 첫차·막차 (노선별, 기점 출발 시각 기준, 하루 캐시) ----------
+   서울: 도착정보 응답에 포함(firstTm/lastTm). TAGO·경기: 노선정보 API 별도 조회
+   (공공데이터포털에서 '버스노선정보' 서비스 활용신청이 안 돼 있으면 키오류 30 → 6시간 재시도 보류) */
+const ROUTE_TIMES_KEY = "busgakRouteTimes";
+let routeTimes = null;            // {"cityCode|버스번호": {first, last, term, at}}
+let routeTimesBlockedUntil = 0;
+const routeTimesInflight = new Set();
+function loadRouteTimes(){
+  if(!routeTimes){ try{ routeTimes = JSON.parse(store.get(ROUTE_TIMES_KEY)||"{}") || {}; }catch(e){ routeTimes = {}; } }
+  return routeTimes;
+}
+function rtKey(cfg, busNo){ return (cfg.cityCode||"") + "|" + normBusNo(busNo); }
+function fmtTm(v){ // "0400  ", "05:00", "2245" → "HH:MM"
+  const d = String(v==null?"":v).replace(/\D/g,"");
+  if(d.length < 4) return "";
+  const hh = d.slice(0,2), mm = d.slice(2,4);
+  if(+hh > 29 || +mm > 59) return "";
+  return hh + ":" + mm;
+}
+function noteRouteTimes(cfg, busNo, first, last, term){
+  const f = fmtTm(first), l = fmtTm(last);
+  if(!f && !l) return;
+  const all = loadRouteTimes();
+  all[rtKey(cfg, busNo)] = {first:f, last:l, term:String(term==null?"":term).replace(/\D/g,""), at:Date.now()};
+  store.set(ROUTE_TIMES_KEY, JSON.stringify(all));
+}
+function getRouteTimes(busNo, cfg){ cfg = cfg || config; return loadRouteTimes()[rtKey(cfg, busNo)] || null; }
+/* 운행 상태 추정: "before"(첫차 전) / "after"(막차 기점 출발 후 90분 경과) / "in" / null */
+function routeServiceState(t, now){
+  if(!t || !t.first || !t.last) return null;
+  now = now || new Date();
+  const cur = now.getHours()*60 + now.getMinutes();
+  const [fh,fm] = t.first.split(":").map(Number), [lh,lm] = t.last.split(":").map(Number);
+  const f = fh*60+fm, l = lh*60+lm;
+  if(l < f) return (cur >= f || cur <= l + 90) ? "in" : "before"; // 자정 넘김 (예: 막차 00:30)
+  if(cur < f) return "before";
+  if(cur > l + 90) return "after";
+  return "in";
+}
+async function refreshRouteTimes(cfg, arrivals){
+  if(cfg !== config) return;
+  const p = provider(cfg);
+  if(p === "seoul" || Date.now() < routeTimesBlockedUntil) return;
+  const wanted = new Set((cfg.buses||[]).map(normBusNo));
+  const seen = new Map(); // 버스번호 → routeId
+  for(const a of arrivals){ const nb = normBusNo(a.routeNo); if(a.routeId && wanted.has(nb) && !seen.has(nb)) seen.set(nb, a.routeId); }
+  for(const [nb, rid] of seen){
+    const cur = loadRouteTimes()[rtKey(cfg, nb)];
+    if(cur && Date.now() - cur.at < 24*3600*1000) continue;
+    if(routeTimesInflight.has(rid)) continue;
+    routeTimesInflight.add(rid);
+    try{
+      if(p === "tago"){
+        const items = await tagoCall("BusRouteInfoInqireService", "getRouteInfoIem", {routeId: rid}, cfg);
+        const it = items && items[0];
+        if(it) noteRouteTimes(cfg, nb, it.startvehicletime, it.endvehicletime, it.intervaltime);
+      }else if(p === "gyeonggi"){
+        const body = await ggCall("busrouteservice/v2/getBusRouteInfoItemv2", {routeId: rid});
+        const it = body && body.busRouteInfoItem;
+        if(it){
+          const firsts = [it.upFirstTime, it.downFirstTime].map(fmtTm).filter(Boolean).sort();
+          const lasts  = [it.upLastTime,  it.downLastTime ].map(fmtTm).filter(Boolean).sort();
+          noteRouteTimes(cfg, nb, firsts[0], lasts[lasts.length-1], it.peekAlloc);
+        }
+      }
+    }catch(e){
+      // 키 미등록(코드 30, 워커가 HTTP 403으로 전달)이면 6시간, 그 밖의 오류는 1시간 보류 (화면 필수 정보가 아님)
+      const notRegistered = /HTTP 403|등록되지 않은|인증 오류/.test(String(e.message||""));
+      routeTimesBlockedUntil = Date.now() + (notRegistered ? 6 : 1)*3600*1000;
+      logEvt(notRegistered ? "노선정보 서비스 미신청 → 첫차·막차 생략" : "첫차·막차 조회 실패(1시간 뒤 재시도)");
+      routeTimesInflight.delete(rid);
+      return;
+    }finally{ routeTimesInflight.delete(rid); }
+  }
+}
 /* cfg 생략 시 활성 config. 다른 프로필(프리페치)은 cfg를 넘겨 전역 config를 건드리지 않음 */
 async function computeOptions(cfg){
   cfg = cfg || config;
   const arrivals = await fetchArrivals(cfg);
-  if(cfg === config) lastArrivalsRaw = arrivals;
+  if(cfg === config){
+    lastArrivalsRaw = arrivals;
+    refreshRouteTimes(cfg, arrivals).catch(()=>{}); // 첫차·막차는 화면을 막지 않고 뒤에서 갱신
+  }
 
   const buses = cfg.buses || [];
   const wantedNos = buses.map(normBusNo);
@@ -1390,6 +1472,7 @@ function render(){
         ${o.lastStopName?`<span class="dc-extra">(${o.lastStopName} 통과)</span>`:""}
         ${o.low==="1"?`<span class="dc-extra">저상</span>`:""}
         ${o.lastBus==="1"||o.lastBus==="Y"?`<span>막차</span>`:""}
+        ${(t => t && (t.first||t.last) ? `<span class="dc-extra">첫차 ${t.first||"-"} · 막차 ${t.last||"-"}</span>` : "")(getRouteTimes(o.busNo))}
       </div>
     </div>`;
   }
@@ -1414,11 +1497,18 @@ function renderUnmatched(unresolved){
   const el = document.getElementById("unmatched-hint");
   if(!unresolved || unresolved.length===0){ el.innerHTML=""; el.dataset.sig=""; return; }
   const nowNos = [...new Set(lastArrivalsRaw.map(a=>a.routeNo).filter(Boolean))];
-  const sig = unresolved.join(",") + "|" + nowNos.sort().join(",");
+  const now = new Date();
+  const timeLines = unresolved.map(b => {
+    const t = getRouteTimes(b); if(!t || !(t.first||t.last)) return "";
+    const st = routeServiceState(t, now);
+    const note = st==="before" ? " → 아직 첫차 전이에요" : st==="after" ? " → 막차 시간이 지났어요" : "";
+    return `<br><b>${escHtml(b)}</b>번 첫차 ${t.first||"-"} · 막차 ${t.last||"-"}${note}`;
+  }).join("");
+  const sig = unresolved.join(",") + "|" + nowNos.sort().join(",") + "|" + timeLines;
   if(el.dataset.sig === sig && el.innerHTML) return;
   el.dataset.sig = sig;
   el.innerHTML = `<div class="notice"><b>${unresolved.join(", ")}</b>번은 지금 이 정류장에 접근 중인 차가 없어요.
-  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}
+  (운행 전이거나 배차 간격이 긴 시간대일 수 있어요)${nowNos.length ? `<br>지금 접근 중인 버스: <b>${nowNos.join(", ")}</b>` : ""}${timeLines}${timeLines ? '<br><span class="muted">첫차·막차는 기점 출발 시각 기준이에요</span>' : ""}
   <br><span class="muted">버스번호가 계속 안 잡히면 설정의 버스번호가 정류장 노선과 정확히 일치하는지 확인해 주세요.</span></div>`;
 }
 
